@@ -1,0 +1,64 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Raw, immutable capture - never edited after creation.
+model Item {
+  id              String   @id @default(cuid())
+  phone           String
+  type            String // "link"
+  rawUrl          String
+  title           String?
+  rawText         String // as received in the SMS body
+  extractedText   String? // best-effort extracted article/caption text
+  contentFidelity String // "full_text" | "metadata_only" | "failed"
+  messageSid      String   @unique
+  createdAt       DateTime @default(now())
+
+  enrichmentRuns EnrichmentRun[]
+}
+
+// One row per (item, model, prompt version) - append-only, never overwritten,
+// so different prompts/models can be compared side by side later.
+model EnrichmentRun {
+  id            String   @id @default(cuid())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id])
+  model         String
+  promptVersion String
+  summary       String
+  tags          String // JSON-encoded string[]
+  category      String
+  inputTokens   Int
+  outputTokens  Int
+  createdAt     DateTime @default(now())
+
+  @@index([itemId])
+}
+
+// Logged chat Q&A exchanges - same append-only logic, doubles as an eval set.
+model ChatTurn {
+  id            String   @id @default(cuid())
+  phone         String
+  question      String
+  answer        String
+  model         String
+  promptVersion String
+  toolCalls     String? // JSON-encoded log of search_items calls made
+  inputTokens   Int
+  outputTokens  Int
+  messageSid    String   @unique
+  createdAt     DateTime @default(now())
+}
+
+// Guards against Twilio webhook retries double-processing the same inbound
+// message, regardless of which command it maps to.
+model ProcessedMessage {
+  messageSid String   @id
+  createdAt  DateTime @default(now())
+}
