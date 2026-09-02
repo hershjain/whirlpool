@@ -20,6 +20,11 @@ model Item {
   messageSid      String   @unique
   createdAt       DateTime @default(now())
 
+  // Position on the canvas moodboard - null until the user drags it there
+  // for the first time, at which point the frontend auto-arranges it.
+  canvasX Float?
+  canvasY Float?
+
   enrichmentRuns EnrichmentRun[]
 }
 

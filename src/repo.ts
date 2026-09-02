@@ -13,6 +13,8 @@ export interface ItemView {
   category: string | null;
   contentFidelity: string;
   createdAt: Date;
+  canvasX: number | null;
+  canvasY: number | null;
 }
 
 function labelFor(item: Item): string {
@@ -36,6 +38,8 @@ async function toItemView(item: Item): Promise<ItemView> {
     category: run?.category ?? null,
     contentFidelity: item.contentFidelity,
     createdAt: item.createdAt,
+    canvasX: item.canvasX,
+    canvasY: item.canvasY,
   };
 }
 
@@ -66,7 +70,22 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
   return Promise.all(matched.slice(0, limit).map((item) => toItemView(item)));
 }
 
-export async function allItemsForDigest(phone: string): Promise<ItemView[]> {
+export async function listAllItems(phone: string): Promise<ItemView[]> {
   const items = await prisma.item.findMany({ where: { phone }, orderBy: { createdAt: "desc" } });
   return Promise.all(items.map(toItemView));
+}
+
+// Scoped to `phone` so a canvas request can never move another user's item,
+// even before real multi-user auth exists.
+export async function updateItemPosition(
+  phone: string,
+  itemId: string,
+  x: number,
+  y: number,
+): Promise<boolean> {
+  const result = await prisma.item.updateMany({
+    where: { id: itemId, phone },
+    data: { canvasX: x, canvasY: y },
+  });
+  return result.count > 0;
 }

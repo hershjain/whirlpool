@@ -1,7 +1,7 @@
 import { prisma } from "./db.js";
 import { extractFromUrl } from "./linkExtract.js";
 import { enrichLink, enrichNote, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
-import { listRecentItems, searchItems, allItemsForDigest } from "./repo.js";
+import { listRecentItems, searchItems, listAllItems } from "./repo.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
 
@@ -146,7 +146,7 @@ async function handleSearch(phone: string, term: string): Promise<string> {
 }
 
 async function handleDigest(phone: string): Promise<string> {
-  const items = await allItemsForDigest(phone);
+  const items = await listAllItems(phone);
   if (items.length === 0) return "Nothing saved yet — text me anything to get started.";
   const digest = await generateDigest(items);
   return digest.text;
