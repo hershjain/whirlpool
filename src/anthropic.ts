@@ -3,7 +3,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { config } from "./config.js";
-import { searchItems, type ItemView } from "./repo.js";
+import { searchItems, listRecentItems, type ItemView } from "./repo.js";
 
 const MODEL = "claude-haiku-4-5";
 const MAX_CHAT_ITERATIONS = 4;
@@ -154,7 +154,8 @@ export interface ChatResult {
 
 const SEARCH_TOOL: Anthropic.Tool = {
   name: "search_items",
-  description: "Search the user's saved items by keyword.",
+  description:
+    "Search the user's saved items by keyword. Use this when the question is about a specific topic.",
   input_schema: {
     type: "object",
     properties: {
@@ -162,6 +163,19 @@ const SEARCH_TOOL: Anthropic.Tool = {
       limit: { type: "integer", description: "Max results to return" },
     },
     required: ["query"],
+  },
+};
+
+const LIST_TOOL: Anthropic.Tool = {
+  name: "list_recent_items",
+  description:
+    "List the user's most recently saved items, newest first. Use this for broad questions " +
+    "like 'what have I saved lately' where there is no specific topic to search for.",
+  input_schema: {
+    type: "object",
+    properties: {
+      limit: { type: "integer", description: "Max items to return (default 10)" },
+    },
   },
 };
 
@@ -177,7 +191,7 @@ export async function chatAnswer(phone: string, question: string): Promise<ChatR
       max_tokens: 1024,
       system: chatSystemPrompt.content,
       messages,
-      tools: [SEARCH_TOOL],
+      tools: [SEARCH_TOOL, LIST_TOOL],
     });
 
     inputTokens += response.usage.input_tokens;
@@ -202,9 +216,17 @@ export async function chatAnswer(phone: string, question: string): Promise<ChatR
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of response.content) {
       if (block.type !== "tool_use") continue;
-      const input = block.input as { query: string; limit?: number };
-      const results = await searchItems(phone, input.query, input.limit ?? 5);
-      toolCalls.push({ query: input.query, resultCount: results.length });
+      const input = block.input as { query?: string; limit?: number };
+
+      const results =
+        block.name === "list_recent_items"
+          ? await listRecentItems(phone, input.limit ?? 10)
+          : await searchItems(phone, input.query ?? "", input.limit ?? 5);
+
+      toolCalls.push({
+        query: block.name === "list_recent_items" ? "(recent items)" : (input.query ?? ""),
+        resultCount: results.length,
+      });
       toolResults.push({
         type: "tool_result",
         tool_use_id: block.id,

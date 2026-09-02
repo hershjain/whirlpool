@@ -1,13 +1,19 @@
 import { randomUUID } from "crypto";
+import { config } from "./config.js";
 import { handleInboundMessage } from "./commands.js";
 
-const [, , phone, ...bodyParts] = process.argv;
-const body = bodyParts.join(" ");
+// The phone number is optional and only needed to simulate a different
+// identity - omit it and this uses the real owner number, so captures show
+// up in the webview (which filters on that same number).
+const args = process.argv.slice(2);
+const phone = args[0]?.startsWith("+") ? args.shift()! : config.ownerPhoneNumber;
+const body = args.join(" ");
 
-if (!phone || !body) {
-  console.error('Usage: npm run dev:cli -- "+15551234567" "https://example.com/article"');
-  console.error('       npm run dev:cli -- "+15551234567" "digest"');
-  console.error('       npm run dev:cli -- "+15551234567" "what have I saved about cooking"');
+if (!body) {
+  console.error('Usage: npm run dev:cli -- "https://example.com/article"');
+  console.error('       npm run dev:cli -- "digest"');
+  console.error('       npm run dev:cli -- "what have I saved about cooking"');
+  console.error('       npm run dev:cli -- "+15551234567" "as a different number"');
   process.exit(1);
 }
 

@@ -1,9 +1,11 @@
 import { randomUUID } from "crypto";
 import readline from "readline";
+import { config } from "./config.js";
 import { handleInboundMessage } from "./commands.js";
 
-const DEFAULT_PHONE = "+15550000001";
-const phone = process.argv[2] ?? DEFAULT_PHONE;
+// Default to the real owner number so anything captured here shows up in the
+// webview too - they filter on the same identity.
+const phone = process.argv[2] ?? config.ownerPhoneNumber;
 
 console.log(`Whirlpool dev chat — texting as ${phone}`);
 console.log('Type a message and press enter, just like texting from your phone.');
