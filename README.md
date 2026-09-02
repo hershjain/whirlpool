@@ -1,17 +1,21 @@
 # Whirlpool
 
-A personal SMS brain-dump: text it a link, it fetches, summarizes, and tags
-it with Claude. Ask it questions about what you've saved and it answers
-conversationally. Text "digest" for an on-demand recap.
+A personal SMS capture inbox: text it a link, a thought, or an idea and it's
+silently saved, summarized, and tagged with Claude. It only replies when you
+actually ask it something — a question about what you've saved, or one of
+its commands.
 
 ## How it works
 
-- **Save**: text a link → Whirlpool fetches the page, extracts the article
-  text (falling back to metadata for JS-heavy sites like Instagram/Twitter,
-  or paywalled articles), and asks Claude Haiku to summarize + tag it.
-- **Ask**: text a question (anything that isn't a link or a recognized
-  command) → Claude searches your saved items itself via tool use and
-  answers conversationally.
+- **Capture**: text anything — a link or a plain thought — and Whirlpool
+  saves it with no reply. Links get fetched and their article text extracted
+  (falling back to metadata for JS-heavy sites like Instagram/Twitter, or
+  paywalled articles); plain text is saved as-is. Either way, Claude Haiku
+  summarizes and tags it in the background. If something goes wrong while
+  saving, you *do* get a reply — errors are never silent, only success is.
+- **Ask**: text a question about what you've saved (Claude decides whether
+  a message is a capture or a question) → Claude searches your saved items
+  itself via tool use and answers conversationally.
 - **Digest**: text "digest" or "recap" → Claude writes a short recap
   resurfacing recent and older saves. On-demand only — nothing is sent
   automatically.

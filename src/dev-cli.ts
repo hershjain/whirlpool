@@ -15,6 +15,10 @@ const messageSid = `TEST_${randomUUID()}`;
 
 handleInboundMessage(phone, body, messageSid)
   .then((reply) => {
+    if (reply === null) {
+      console.log("\n(captured silently — no reply sent)\n");
+      return;
+    }
     console.log("\n--- Reply ---\n");
     console.log(reply);
     console.log();

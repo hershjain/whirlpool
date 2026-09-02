@@ -23,12 +23,14 @@ function loadPrompt(name: string): Prompt {
 }
 
 const enrichLinkPrompt = loadPrompt("enrich-link");
+const enrichNotePrompt = loadPrompt("enrich-note");
+const classifyPrompt = loadPrompt("classify");
 const chatSystemPrompt = loadPrompt("chat-system");
 const digestPrompt = loadPrompt("digest");
 
 function formatItemForModel(item: ItemView) {
   return {
-    title: item.title,
+    title: item.label,
     url: item.rawUrl,
     summary: item.summary,
     tags: item.tags,
@@ -38,7 +40,7 @@ function formatItemForModel(item: ItemView) {
   };
 }
 
-// --- Link enrichment (summary + tags + category) ---
+// --- Enrichment (summary + tags + category), shared by links and notes ---
 
 export interface EnrichmentResult {
   summary: string;
@@ -50,16 +52,16 @@ export interface EnrichmentResult {
   outputTokens: number;
 }
 
-export async function enrichLink(extractedText: string): Promise<EnrichmentResult> {
+async function runEnrichment(text: string, prompt: Prompt): Promise<EnrichmentResult> {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
-    system: enrichLinkPrompt.content,
-    messages: [{ role: "user", content: extractedText.slice(0, 12_000) }],
+    system: prompt.content,
+    messages: [{ role: "user", content: text.slice(0, 12_000) }],
     tools: [
       {
         name: "record_enrichment",
-        description: "Record the summary, tags, and category for this saved link.",
+        description: "Record the summary, tags, and category for this saved item.",
         input_schema: {
           type: "object",
           properties: {
@@ -89,10 +91,54 @@ export async function enrichLink(extractedText: string): Promise<EnrichmentResul
     tags: input.tags,
     category: input.category,
     model: MODEL,
-    promptVersion: enrichLinkPrompt.version,
+    promptVersion: prompt.version,
     inputTokens: response.usage.input_tokens,
     outputTokens: response.usage.output_tokens,
   };
+}
+
+export function enrichLink(extractedText: string): Promise<EnrichmentResult> {
+  return runEnrichment(extractedText, enrichLinkPrompt);
+}
+
+export function enrichNote(text: string): Promise<EnrichmentResult> {
+  return runEnrichment(text, enrichNotePrompt);
+}
+
+// --- Classify a freeform message as a capture or a question ---
+
+export async function classifyMessage(text: string): Promise<"capture" | "question"> {
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 128,
+    system: classifyPrompt.content,
+    messages: [{ role: "user", content: text }],
+    tools: [
+      {
+        name: "classify",
+        description: "Classify this message as a capture or a question.",
+        input_schema: {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["capture", "question"] },
+          },
+          required: ["type"],
+          additionalProperties: false,
+        },
+        strict: true,
+      },
+    ],
+    tool_choice: { type: "tool", name: "classify" },
+  });
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === "tool_use",
+  );
+  if (!toolUse) {
+    throw new Error("Claude did not return the expected classify tool call");
+  }
+  const input = toolUse.input as { type: "capture" | "question" };
+  return input.type;
 }
 
 // --- Chat / Q&A over saved items (tool-use retrieval loop) ---

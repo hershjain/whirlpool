@@ -11,8 +11,8 @@ generator client {
 model Item {
   id              String   @id @default(cuid())
   phone           String
-  type            String // "link"
-  rawUrl          String
+  type            String // "link" | "note"
+  rawUrl          String?
   title           String?
   rawText         String // as received in the SMS body
   extractedText   String? // best-effort extracted article/caption text

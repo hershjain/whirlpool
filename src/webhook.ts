@@ -45,7 +45,9 @@ async function processInBackground(from: string, body: string, messageSid: strin
 
   try {
     const reply = await handleInboundMessage(from, body, messageSid);
-    await sendSms(from, reply);
+    if (reply) {
+      await sendSms(from, reply);
+    }
   } catch (error) {
     console.error("Failed to process inbound message", messageSid, error);
     await sendSms(from, "Something went wrong processing that — try again in a bit.").catch(() => {});

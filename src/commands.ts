@@ -1,24 +1,27 @@
 import { prisma } from "./db.js";
 import { extractFromUrl } from "./linkExtract.js";
-import { enrichLink, chatAnswer, generateDigest } from "./anthropic.js";
+import { enrichLink, enrichNote, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, allItemsForDigest } from "./repo.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
 
 const HELP_TEXT = [
   "Whirlpool commands:",
-  '- Send a link to save it',
+  "- Send anything (a link, a thought, an idea) to capture it — no reply, it's just saved",
   '- "list" - your 5 most recent saves',
   '- "search <term>" - search your saves',
   '- "digest" - a recap of what you\'ve saved',
-  "- or just ask a question about what you've saved",
+  "- or ask a question about what you've saved, and I'll answer",
 ].join("\n");
 
+// Returns null when the message was captured silently (the normal case);
+// returns a string only when a reply is actually owed - a command's output,
+// a chat answer, or (via a thrown error bubbling up to the caller) a failure.
 export async function handleInboundMessage(
   phone: string,
   body: string,
   messageSid: string,
-): Promise<string> {
+): Promise<string | null> {
   const trimmed = body.trim();
   const lower = trimmed.toLowerCase();
 
@@ -43,7 +46,12 @@ export async function handleInboundMessage(
     return HELP_TEXT;
   }
 
-  return handleChat(phone, trimmed, messageSid);
+  const classification = await classifyMessage(trimmed);
+  if (classification === "question") {
+    return handleChat(phone, trimmed, messageSid);
+  }
+
+  return handleSaveNote(phone, trimmed, messageSid);
 }
 
 async function handleSaveLink(
@@ -51,7 +59,7 @@ async function handleSaveLink(
   url: string,
   rawText: string,
   messageSid: string,
-): Promise<string> {
+): Promise<null> {
   const extraction = await extractFromUrl(url);
 
   const item = await prisma.item.create({
@@ -68,7 +76,7 @@ async function handleSaveLink(
   });
 
   if (extraction.contentFidelity === "failed" || !extraction.extractedText) {
-    return "Saved — but I couldn't pull any content from that link, so it's just stored as-is. You may want to open it directly later.";
+    return null;
   }
 
   const enrichment = await enrichLink(extraction.extractedText);
@@ -85,17 +93,47 @@ async function handleSaveLink(
     },
   });
 
-  const fidelityNote = extraction.contentFidelity === "metadata_only" ? " (partial info only)" : "";
-  return `Saved${fidelityNote}: ${extraction.title ?? url}\n${enrichment.summary}\nTags: ${enrichment.tags.join(", ")}`;
+  return null;
+}
+
+async function handleSaveNote(phone: string, text: string, messageSid: string): Promise<null> {
+  const item = await prisma.item.create({
+    data: {
+      phone,
+      type: "note",
+      rawUrl: null,
+      title: null,
+      rawText: text,
+      extractedText: text,
+      contentFidelity: "full_text",
+      messageSid,
+    },
+  });
+
+  const enrichment = await enrichNote(text);
+  await prisma.enrichmentRun.create({
+    data: {
+      itemId: item.id,
+      model: enrichment.model,
+      promptVersion: enrichment.promptVersion,
+      summary: enrichment.summary,
+      tags: JSON.stringify(enrichment.tags),
+      category: enrichment.category,
+      inputTokens: enrichment.inputTokens,
+      outputTokens: enrichment.outputTokens,
+    },
+  });
+
+  return null;
 }
 
 async function handleList(phone: string): Promise<string> {
   const items = await listRecentItems(phone, 5);
-  if (items.length === 0) return "Nothing saved yet — text me a link to get started.";
+  if (items.length === 0) return "Nothing saved yet — text me anything to get started.";
   return items
     .map((item, i) => {
       const tags = item.tags.length ? ` (${item.tags.join(", ")})` : "";
-      return `${i + 1}. ${item.title ?? item.rawUrl}${tags}`;
+      return `${i + 1}. ${item.label}${tags}`;
     })
     .join("\n");
 }
@@ -104,14 +142,12 @@ async function handleSearch(phone: string, term: string): Promise<string> {
   if (!term) return 'Try "search <term>" — e.g. "search cooking"';
   const items = await searchItems(phone, term, 5);
   if (items.length === 0) return `Nothing found for "${term}".`;
-  return items
-    .map((item, i) => `${i + 1}. ${item.title ?? item.rawUrl} — ${item.summary ?? ""}`)
-    .join("\n");
+  return items.map((item, i) => `${i + 1}. ${item.label} — ${item.summary ?? ""}`).join("\n");
 }
 
 async function handleDigest(phone: string): Promise<string> {
   const items = await allItemsForDigest(phone);
-  if (items.length === 0) return "Nothing saved yet — text me a link to get started.";
+  if (items.length === 0) return "Nothing saved yet — text me anything to get started.";
   const digest = await generateDigest(items);
   return digest.text;
 }

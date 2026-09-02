@@ -4,12 +4,21 @@ import type { Item, EnrichmentRun } from "@prisma/client";
 export interface ItemView {
   id: string;
   title: string | null;
-  rawUrl: string;
+  rawUrl: string | null;
+  // Best available display label: title, falling back to the URL, falling
+  // back to a truncated snippet of the raw captured text (for notes).
+  label: string;
   summary: string | null;
   tags: string[];
   category: string | null;
   contentFidelity: string;
   createdAt: Date;
+}
+
+function labelFor(item: Item): string {
+  if (item.title) return item.title;
+  if (item.rawUrl) return item.rawUrl;
+  return item.rawText.length > 60 ? `${item.rawText.slice(0, 57)}...` : item.rawText;
 }
 
 async function toItemView(item: Item): Promise<ItemView> {
@@ -21,6 +30,7 @@ async function toItemView(item: Item): Promise<ItemView> {
     id: item.id,
     title: item.title,
     rawUrl: item.rawUrl,
+    label: labelFor(item),
     summary: run?.summary ?? null,
     tags: run ? (JSON.parse(run.tags) as string[]) : [],
     category: run?.category ?? null,
