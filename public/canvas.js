@@ -7,7 +7,16 @@ const filterToggle = document.getElementById("filter-toggle");
 // Every rendered card paired with the item it came from, so filtering can
 // reposition and restore without refetching.
 const cards = new Map(); // id -> { item, el }
-let activeFilter = null; // { kind: "category" | "tag", value: string } | null
+let activeFilter = null; // { kind: "category" | "tag" | "folder", value: string } | null
+
+// Ids whose left/top are a layout artefact rather than where the user put the
+// card - a filter grid, or a folder cluster. Saving one would overwrite the
+// real position with a temporary one. Rebuilt by applyFilter() every time.
+const reflowed = new Set();
+
+// [{id, name, itemCount}] from GET /api/folders - user-made collections, as
+// against the model's tags and category. Refreshed whenever a filing changes.
+let folders = [];
 
 const MAX_TAG_CHIPS = 12;
 
@@ -120,11 +129,18 @@ const CARD_W = 240; // keep in sync with `width` on .card in style.css
 const CARD_GAP = 32;
 const CARD_ROW_HEIGHT = 560; // tall enough for a fully-clamped card with a tall media hero + breathing room
 
+// A folder's cluster is narrower than the full grid - it's meant to read as a
+// compact group sitting within the wider board, not another full-width row.
+const FOLDER_COLS = 3;
+const FOLDER_ZONE_PADDING = 40;
+
 async function loadItems() {
-  const [items, sources] = await Promise.all([
+  const [items, sources, folderList] = await Promise.all([
     fetch("/api/items").then((res) => res.json()),
     fetch("/api/sources").then((res) => res.json()),
+    fetch("/api/folders").then((res) => res.json()),
   ]);
+  folders = folderList;
   const sourceByHostname = new Map(sources.map((source) => [source.hostname, source]));
 
   if (items.length === 0) {
@@ -157,16 +173,18 @@ async function loadItems() {
     cards.set(item.id, { item, el: card });
   }
 
-  buildFilterBar(items);
+  buildFilterBar(items, folderList);
 }
 
-// --- Filtering by category and tag ---
+// --- Filtering by folder, category, and tag ---
 
-// Categories lead because they actually group: 6 values across 12 cards here,
-// against 42 distinct tags used 46 times. A tag used once isn't a filter - it's
-// a link to a single tile - so single-use tags are left out entirely.
-function buildFilterBar(items) {
+// Folders lead because the user made them on purpose; categories come next
+// because they actually group (6 values across 12 cards here); tags trail
+// and only the ones used more than once are shown (42 distinct tags used 46
+// times - a tag used once isn't a filter, it's a link to a single tile).
+function buildFilterBar(items, folderList) {
   if (!filterBar) return;
+  folders = folderList;
 
   const categories = new Map();
   const tags = new Map();
@@ -181,33 +199,69 @@ function buildFilterBar(items) {
   const byCount = (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]);
   const categoryChips = [...categories].sort(byCount);
   const tagChips = [...tags].filter(([, n]) => n > 1).sort(byCount).slice(0, MAX_TAG_CHIPS);
+  // An empty folder in the filter bar would just be a dead click - it stays
+  // choosable from a tile's own folder menu, but doesn't clutter the bar.
+  const folderChips = folderList
+    .filter((folder) => folder.itemCount > 0)
+    .sort((a, b) => b.itemCount - a.itemCount || a.name.localeCompare(b.name));
 
   filterBar.replaceChildren();
-  for (const [value, count] of categoryChips) filterBar.appendChild(filterChip("category", value, count));
+  let needsDivider = false;
+
+  if (folderChips.length) {
+    for (const folder of folderChips) {
+      filterBar.appendChild(filterChip("folder", folder.id, folder.itemCount, folder.name));
+    }
+    needsDivider = true;
+  }
+
+  if (categoryChips.length) {
+    if (needsDivider) filterBar.appendChild(filterDivider());
+    for (const [value, count] of categoryChips) filterBar.appendChild(filterChip("category", value, count));
+    needsDivider = true;
+  }
 
   if (tagChips.length) {
-    const divider = document.createElement("span");
-    divider.className = "filter-divider";
-    filterBar.appendChild(divider);
+    if (needsDivider) filterBar.appendChild(filterDivider());
     for (const [value, count] of tagChips) filterBar.appendChild(filterChip("tag", value, count));
   }
 }
 
-function filterChip(kind, value, count) {
+function filterDivider() {
+  const divider = document.createElement("span");
+  divider.className = "filter-divider";
+  return divider;
+}
+
+function filterChip(kind, value, count, label = value) {
   const chip = document.createElement("button");
   chip.type = "button";
-  chip.className = "filter-chip";
+  chip.className = kind === "folder" ? "filter-chip filter-chip--folder" : "filter-chip";
   chip.dataset.kind = kind;
   chip.dataset.value = value;
-  chip.innerHTML = `${escapeHtml(value)} <span class="filter-count">${count}</span>`;
+  chip.innerHTML = `${escapeHtml(label)} <span class="filter-count">${count}</span>`;
   chip.addEventListener("click", () => toggleFilter(kind, value));
   return chip;
+}
+
+function updateFilterChipStates() {
+  for (const chip of filterBar?.querySelectorAll(".filter-chip") ?? []) {
+    const on =
+      activeFilter && chip.dataset.kind === activeFilter.kind && chip.dataset.value === activeFilter.value;
+    chip.classList.toggle("is-active", Boolean(on));
+  }
 }
 
 function matchesFilter(item) {
   if (!activeFilter) return true;
   if (activeFilter.kind === "category") return item.category === activeFilter.value;
+  if (activeFilter.kind === "folder") return item.folderId === activeFilter.value;
   return (item.tags ?? []).some((tag) => tag.trim().toLowerCase() === activeFilter.value);
+}
+
+function activeFolderName() {
+  const folder = folders.find((f) => f.id === activeFilter?.value);
+  return folder ? folder.name : "Folder";
 }
 
 function toggleFilter(kind, value) {
@@ -217,41 +271,134 @@ function toggleFilter(kind, value) {
 }
 
 function applyFilter() {
+  reflowed.clear();
+
+  if (!activeFilter) {
+    // Nothing filtered - every card goes back to its real, hand-placed spot.
+    // This is also what un-clusters a folder's members: applyFolderLayout
+    // never touches a non-member's position, and members are only ever moved
+    // in memory (style.left/top), never through savePosition - canvasX/
+    // canvasY stay the source of truth throughout.
+    removeFolderZone();
+    for (const entry of cards.values()) {
+      entry.el.hidden = false;
+      entry.el.classList.remove("card--dimmed", "card--foldered");
+      entry.el.style.left = `${entry.item.canvasX}px`;
+      entry.el.style.top = `${entry.item.canvasY}px`;
+    }
+    applyTransform();
+    updateFilterChipStates();
+    return;
+  }
+
+  if (activeFilter.kind === "folder") {
+    applyFolderLayout();
+    updateFilterChipStates();
+    return;
+  }
+
+  // Category or tag: hide non-matches, gather matches into a readable grid,
+  // oldest first, and reset the view so results are actually on screen.
+  removeFolderZone();
   const visible = [];
   for (const entry of cards.values()) {
+    entry.el.classList.remove("card--dimmed", "card--foldered");
     const shown = matchesFilter(entry.item);
     entry.el.hidden = !shown;
     if (shown) visible.push(entry);
   }
 
-  if (activeFilter) {
-    // Gather matches into a readable grid, oldest first. Written straight to
-    // style and never through savePosition - canvasX/canvasY stay the source
-    // of truth so clearing the filter restores the hand-placed layout exactly.
-    visible.sort((a, b) => new Date(a.item.createdAt) - new Date(b.item.createdAt));
-    visible.forEach((entry, index) => {
-      entry.el.style.left = `${(index % GRID_COLS) * (CARD_W + CARD_GAP)}px`;
-      entry.el.style.top = `${Math.floor(index / GRID_COLS) * CARD_ROW_HEIGHT}px`;
-    });
-    // Put the grid on screen; a filter that leaves you looking at empty canvas
-    // reads as "nothing matched".
-    panX = 100;
-    panY = 100;
-    scale = 1;
-  } else {
-    for (const entry of cards.values()) {
-      entry.el.style.left = `${entry.item.canvasX}px`;
-      entry.el.style.top = `${entry.item.canvasY}px`;
-    }
-  }
+  visible.sort((a, b) => new Date(a.item.createdAt) - new Date(b.item.createdAt));
+  visible.forEach((entry, index) => {
+    entry.el.style.left = `${(index % GRID_COLS) * (CARD_W + CARD_GAP)}px`;
+    entry.el.style.top = `${Math.floor(index / GRID_COLS) * CARD_ROW_HEIGHT}px`;
+    reflowed.add(entry.item.id);
+  });
+  panX = 100;
+  panY = 100;
+  scale = 1;
 
   applyTransform();
+  updateFilterChipStates();
+}
 
-  for (const chip of filterBar?.querySelectorAll(".filter-chip") ?? []) {
-    const on =
-      activeFilter && chip.dataset.kind === activeFilter.kind && chip.dataset.value === activeFilter.value;
-    chip.classList.toggle("is-active", Boolean(on));
+// A folder never hides anything: members gather into a compact cluster with a
+// translucent square behind them; everyone else dims but stays exactly where
+// they were, and stays draggable - including into or out of the square.
+function applyFolderLayout() {
+  const members = [];
+  for (const entry of cards.values()) {
+    entry.el.hidden = false;
+    const isMember = matchesFilter(entry.item);
+    entry.el.classList.toggle("card--foldered", isMember);
+    entry.el.classList.toggle("card--dimmed", !isMember);
+    if (isMember) members.push(entry);
   }
+  members.sort((a, b) => new Date(a.item.createdAt) - new Date(b.item.createdAt));
+
+  // Centred on the current viewport in world coordinates, so the cluster
+  // appears where the user is already looking - unlike a tag/category filter,
+  // the point here is to see the folder in the context of the wider board, so
+  // the pan is never reset.
+  const rect = viewport.getBoundingClientRect();
+  const centreX = (rect.width / 2 - panX) / scale;
+  const centreY = (rect.height / 2 - panY) / scale;
+
+  const cols = Math.min(FOLDER_COLS, Math.max(1, members.length));
+  const rows = Math.max(1, Math.ceil(members.length / cols));
+  const clusterW = cols * CARD_W + (cols - 1) * CARD_GAP;
+  const clusterH = rows * CARD_ROW_HEIGHT;
+  const originX = centreX - clusterW / 2;
+  const originY = centreY - clusterH / 2;
+
+  members.forEach((entry, index) => {
+    const col = index % cols;
+    const row = Math.floor(index / cols);
+    entry.el.style.left = `${originX + col * (CARD_W + CARD_GAP)}px`;
+    entry.el.style.top = `${originY + row * CARD_ROW_HEIGHT}px`;
+    reflowed.add(entry.item.id);
+  });
+
+  renderFolderZone(originX, originY, clusterW, clusterH);
+  applyTransform();
+}
+
+// The translucent square drawn behind a folder's members. A single element,
+// reused across opens rather than recreated - only its position/size/label
+// change. pointer-events:none is what lets a dimmed card sitting underneath
+// it still be grabbed; drops are hit-tested against folderZoneRect instead.
+let folderZoneEl = null;
+let folderZoneRect = null; // { left, top, right, bottom } in world px, or null
+
+function renderFolderZone(originX, originY, clusterW, clusterH) {
+  const left = originX - FOLDER_ZONE_PADDING;
+  const top = originY - FOLDER_ZONE_PADDING;
+  const width = clusterW + FOLDER_ZONE_PADDING * 2;
+  const height = clusterH + FOLDER_ZONE_PADDING * 2;
+
+  if (!folderZoneEl) {
+    folderZoneEl = document.createElement("div");
+    folderZoneEl.className = "folder-zone";
+    const label = document.createElement("span");
+    label.className = "folder-zone-label";
+    folderZoneEl.appendChild(label);
+  }
+  // First child of #world so cards (appended earlier, and re-flowed above it
+  // in z-index) always paint over it, whether freshly created or reused.
+  world.insertBefore(folderZoneEl, world.firstChild);
+
+  folderZoneEl.style.left = `${left}px`;
+  folderZoneEl.style.top = `${top}px`;
+  folderZoneEl.style.width = `${width}px`;
+  folderZoneEl.style.height = `${height}px`;
+  folderZoneEl.querySelector(".folder-zone-label").textContent = activeFolderName();
+
+  folderZoneRect = { left, top, right: left + width, bottom: top + height };
+}
+
+function removeFolderZone() {
+  if (folderZoneEl) folderZoneEl.remove();
+  folderZoneRect = null;
 }
 
 if (filterToggle && filterBar) {
@@ -301,7 +448,10 @@ function renderCard(item, source) {
   let html = `
     <div class="card-header">
       <span class="card-source-name">${escapeHtml(headerName)}</span>
-      ${logo}
+      <div class="card-header-right">
+        ${folderButtonMarkup(item)}
+        ${logo}
+      </div>
     </div>
   `;
 
@@ -366,8 +516,184 @@ function renderCard(item, source) {
 
   card.innerHTML = html;
 
+  wireFolderButton(card, item);
   attachCardDrag(card, item);
   return card;
+}
+
+// --- Folders: user-made collections, distinct from the model's tags/category ---
+
+// Filed tiles show the folder's name at tag size, in green; an unfiled tile
+// shows a plain "+" instead - same glyph family as the zoom controls, not an
+// emoji, to match the rest of the UI's plain-text conventions.
+function folderButtonMarkup(item) {
+  return item.folderName
+    ? `<button type="button" class="card-folder" data-folder-btn>${escapeHtml(item.folderName)}</button>`
+    : `<button type="button" class="card-folder card-folder--empty" data-folder-btn aria-label="Add to folder">+</button>`;
+}
+
+function wireFolderButton(card, item) {
+  const button = card.querySelector("[data-folder-btn]");
+  if (!button) return;
+  // Same guard as .card-expand: without it the card's own pointerup treats
+  // this click as a tap and opens the link instead of the menu.
+  for (const type of ["pointerdown", "pointermove", "pointerup", "click"]) {
+    button.addEventListener(type, (e) => e.stopPropagation());
+  }
+  button.addEventListener("click", () => openFolderMenu(button, item));
+}
+
+// Re-renders one card's folder control after a filing change, without
+// touching the rest of the card (its expanded/dragging state, etc).
+function updateCardFolderControl(item) {
+  const entry = cards.get(item.id);
+  if (!entry) return;
+  const button = entry.el.querySelector("[data-folder-btn]");
+  if (!button) return;
+  button.outerHTML = folderButtonMarkup(item);
+  wireFolderButton(entry.el, item);
+}
+
+// A single floating popover, positioned per use rather than one per card - it
+// lists existing folders, a field to create a new one, and (when the tile is
+// already filed) a way to remove it.
+let folderMenuEl = null;
+let folderMenuItem = null; // the item the open menu is currently editing
+
+function ensureFolderMenu() {
+  if (folderMenuEl) return folderMenuEl;
+
+  folderMenuEl = document.createElement("div");
+  folderMenuEl.id = "folder-menu";
+  folderMenuEl.hidden = true;
+
+  // Same guard as the folder button itself and .card-expand - without it, a
+  // click inside the menu bubbles to the canvas and can start a pan, or reach
+  // a card underneath and open its link.
+  for (const type of ["pointerdown", "pointermove", "pointerup", "click"]) {
+    folderMenuEl.addEventListener(type, (e) => e.stopPropagation());
+  }
+
+  document.body.appendChild(folderMenuEl);
+  return folderMenuEl;
+}
+
+function closeFolderMenu() {
+  if (folderMenuEl) folderMenuEl.hidden = true;
+  folderMenuItem = null;
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (folderMenuEl && !folderMenuEl.hidden && !folderMenuEl.contains(e.target)) closeFolderMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeFolderMenu();
+});
+
+function openFolderMenu(anchorEl, item) {
+  const menu = ensureFolderMenu();
+  folderMenuItem = item;
+
+  const anchorRect = anchorEl.getBoundingClientRect();
+  menu.style.left = `${anchorRect.left}px`;
+  menu.style.top = `${anchorRect.bottom + 4}px`;
+
+  const optionsHtml = folders.length
+    ? folders
+        .map(
+          (folder) =>
+            `<button type="button" class="folder-menu-option" data-folder-id="${escapeHtml(folder.id)}">${escapeHtml(folder.name)}</button>`,
+        )
+        .join("")
+    : `<div class="folder-menu-empty">No folders yet</div>`;
+
+  menu.innerHTML = `
+    <div class="folder-menu-list">${optionsHtml}</div>
+    <form class="folder-menu-new">
+      <input type="text" placeholder="New folder…" maxlength="60" />
+      <button type="submit">Add</button>
+    </form>
+    ${item.folderId ? `<button type="button" class="folder-menu-remove">Remove from folder</button>` : ""}
+  `;
+  menu.hidden = false;
+
+  for (const optionBtn of menu.querySelectorAll(".folder-menu-option")) {
+    optionBtn.addEventListener("click", () => {
+      fileItemInFolder(folderMenuItem, optionBtn.dataset.folderId);
+      closeFolderMenu();
+    });
+  }
+
+  const form = menu.querySelector(".folder-menu-new");
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = form.querySelector("input");
+    const name = input.value.trim();
+    if (!name) return;
+    createFolderAndFile(folderMenuItem, name);
+    closeFolderMenu();
+  });
+
+  const removeBtn = menu.querySelector(".folder-menu-remove");
+  if (removeBtn) {
+    removeBtn.addEventListener("click", () => {
+      fileItemInFolder(folderMenuItem, null);
+      closeFolderMenu();
+    });
+  }
+}
+
+// Files (folderId a string) or unfiles (folderId null) an item, updates the
+// same item object referenced by the cards map so the change is visible
+// immediately, and keeps the filter bar's folder chips/counts in sync.
+async function fileItemInFolder(item, folderId) {
+  try {
+    const res = await fetch(`/api/items/${item.id}/folder`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    });
+    if (!res.ok) return;
+  } catch (error) {
+    console.error("Failed to update item folder", error);
+    return;
+  }
+
+  item.folderId = folderId;
+  item.folderName = folderId ? (folders.find((f) => f.id === folderId)?.name ?? null) : null;
+
+  updateCardFolderControl(item);
+  await refreshFolders();
+  if (activeFilter?.kind === "folder") applyFilter();
+}
+
+async function createFolderAndFile(item, name) {
+  let folder;
+  try {
+    const res = await fetch("/api/folders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) return;
+    folder = await res.json();
+  } catch (error) {
+    console.error("Failed to create folder", error);
+    return;
+  }
+
+  folders = [...folders.filter((f) => f.id !== folder.id), folder];
+  await fileItemInFolder(item, folder.id);
+}
+
+async function refreshFolders() {
+  try {
+    folders = await fetch("/api/folders").then((res) => res.json());
+    buildFilterBar([...cards.values()].map((entry) => entry.item), folders);
+    updateFilterChipStates();
+  } catch (error) {
+    console.error("Failed to refresh folders", error);
+  }
 }
 
 // Long captions are clamped so one rambling post can't tower over the canvas.
@@ -438,16 +764,59 @@ function attachCardDrag(card, item) {
     dragging = false;
     card.classList.remove("dragging");
     if (moved) {
-      // Positions are only real when the full board is shown. While filtered,
-      // cards sit at temporary grid coordinates and persisting one would
-      // overwrite where the user actually put it.
-      if (!activeFilter) {
+      if (activeFilter?.kind === "folder") {
+        handleFolderDrop(item, card);
+      } else if (!reflowed.has(item.id)) {
+        // Positions are only real when they're not a layout artefact. Under a
+        // tag/category filter every visible card is reflowed; under a folder
+        // filter only the members are - a dimmed card's position is real and
+        // saves normally.
         savePosition(item.id, parseFloat(card.style.left), parseFloat(card.style.top));
       }
     } else if (item.rawUrl) {
       window.open(item.rawUrl, "_blank", "noopener,noreferrer");
     }
   });
+}
+
+// While a folder is open, where a card was dropped decides its filing:
+// - dropped inside the zone, not yet a member -> files it, and the cluster
+//   re-flows to include it (no position saved - it's reflowed into the grid).
+// - dropped outside the zone, currently a member -> unfiles it and saves the
+//   dropped position, the natural inverse of dragging one in.
+// - dropped inside the zone, already a member -> just resettles into the grid.
+// - dropped outside, not a member -> an ordinary drag of a dimmed card.
+function handleFolderDrop(item, card) {
+  const cx = parseFloat(card.style.left) + CARD_W / 2;
+  const height = card.offsetHeight || CARD_ROW_HEIGHT;
+  const cy = parseFloat(card.style.top) + height / 2;
+
+  const inside =
+    folderZoneRect &&
+    cx >= folderZoneRect.left &&
+    cx <= folderZoneRect.right &&
+    cy >= folderZoneRect.top &&
+    cy <= folderZoneRect.bottom;
+  const isMember = item.folderId === activeFilter.value;
+
+  if (inside && !isMember) {
+    fileItemInFolder(item, activeFilter.value);
+    return;
+  }
+
+  if (!inside && isMember) {
+    const droppedX = parseFloat(card.style.left);
+    const droppedY = parseFloat(card.style.top);
+    fileItemInFolder(item, null).then(() => savePosition(item.id, droppedX, droppedY));
+    return;
+  }
+
+  if (inside && isMember) {
+    applyFilter(); // repositioned within the cluster - just resettle it onto the grid
+    return;
+  }
+
+  savePosition(item.id, parseFloat(card.style.left), parseFloat(card.style.top));
 }
 
 async function savePosition(id, x, y) {

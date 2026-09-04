@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { config } from "./config.js";
-import { listAllItems, updateItemPosition } from "./repo.js";
+import { listAllItems, updateItemPosition, listFolders, createFolder, setItemFolder } from "./repo.js";
 import { prisma } from "./db.js";
 
 export const canvasRouter: Router = Router();
@@ -53,6 +53,48 @@ canvasRouter.patch("/items/:id/position", async (req, res) => {
   const updated = await updateItemPosition(config.ownerPhoneNumber, id, x, y);
   if (!updated) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  res.status(204).end();
+});
+
+// --- Folders: user-made collections ---
+
+canvasRouter.get("/folders", async (_req, res) => {
+  const folders = await listFolders(config.ownerPhoneNumber);
+  res.json(folders);
+});
+
+canvasRouter.post("/folders", async (req, res) => {
+  const { name } = req.body as { name?: unknown };
+
+  if (typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "name must be a non-empty string" });
+    return;
+  }
+
+  const folder = await createFolder(config.ownerPhoneNumber, name);
+  // createFolder only returns null when the trimmed name was empty, which the
+  // check above already rules out - but keep the guard rather than assert.
+  if (!folder) {
+    res.status(400).json({ error: "name must be a non-empty string" });
+    return;
+  }
+  res.json(folder);
+});
+
+canvasRouter.patch("/items/:id/folder", async (req, res) => {
+  const { id } = req.params;
+  const { folderId } = req.body as { folderId?: unknown };
+
+  if (folderId !== null && typeof folderId !== "string") {
+    res.status(400).json({ error: "folderId must be a string or null" });
+    return;
+  }
+
+  const updated = await setItemFolder(config.ownerPhoneNumber, id, folderId);
+  if (!updated) {
+    res.status(404).json({ error: "Item or folder not found" });
     return;
   }
   res.status(204).end();

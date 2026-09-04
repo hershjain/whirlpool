@@ -34,7 +34,28 @@ model Item {
   canvasX Float?
   canvasY Float?
 
+  // Exactly one folder, or none - the canvas draws a folder's members inside a
+  // single translucent square, which a tile can't be in two of at once.
+  folderId String?
+  folder   Folder? @relation(fields: [folderId], references: [id])
+
   enrichmentRuns EnrichmentRun[]
+
+  @@index([folderId])
+}
+
+// User-made collections, as against the LLM's tags and category. Scoped by
+// phone like Item, and unique per owner so "Research" means one thing.
+model Folder {
+  id        String   @id @default(cuid())
+  phone     String
+  name      String
+  createdAt DateTime @default(now())
+
+  items Item[]
+
+  @@unique([phone, name])
+  @@index([phone])
 }
 
 // One row per (item, model, prompt version) - append-only, never overwritten,

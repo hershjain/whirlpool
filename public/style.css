@@ -17,6 +17,12 @@
      the user's own writing rather than something saved from a site. */
   --note-color: #fbf3c4;
   --note-text-color: #4a4326;
+  /* Folders are user-made collections, as against the model's tags/category -
+     green and rectangular, against the tags' pink pills, so the two never
+     get mistaken for one another. */
+  --folder-accent: #1f8b4c;
+  --folder-bg: #e7f5ec;
+  --folder-text: #17663a;
 }
 
 * { box-sizing: border-box; }
@@ -111,6 +117,21 @@ html, body {
 .filter-chip.is-active {
   color: #fff;
   background: var(--accent);
+}
+
+.filter-chip--folder {
+  border-radius: 4px; /* rectangle, against the pill-shaped category/tag chips */
+  color: var(--folder-text);
+  background: var(--folder-bg);
+}
+
+.filter-chip--folder:hover {
+  border-color: var(--folder-accent);
+}
+
+.filter-chip--folder.is-active {
+  color: #fff;
+  background: var(--folder-accent);
 }
 
 .filter-count {
@@ -232,6 +253,40 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Groups the folder control and the logo so they sit adjacent on the right
+   (folder immediately left of the logo) while .card-header's space-between
+   still pushes the source name to the left. */
+.card-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.card-folder {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 11px; /* matches .card-tag */
+  font-weight: 600;
+  padding: 3px 8px; /* matches .card-tag */
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--folder-accent);
+  border: none;
+  border-radius: 4px; /* rectangle, against the tag pill's 999px */
+  cursor: pointer;
+}
+
+.card-folder--empty {
+  color: var(--folder-accent);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 3px 7px;
+  max-width: none;
 }
 
 .card-logo {
@@ -389,6 +444,119 @@ html, body {
   background: var(--tag-bg);
   padding: 3px 8px;
   border-radius: 999px;
+}
+
+/* --- Folder menu: a single floating popover, positioned per use --- */
+#folder-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 160px;
+  max-width: 220px;
+  padding: 6px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
+  font-size: 13px;
+}
+
+.folder-menu-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.folder-menu-option,
+.folder-menu-remove {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.folder-menu-option:hover,
+.folder-menu-remove:hover {
+  background: var(--tag-bg);
+}
+
+.folder-menu-remove {
+  color: #b3312c;
+  margin-top: 2px;
+  border-top: 1px solid var(--card-border);
+  border-radius: 0;
+  padding-top: 8px;
+}
+
+.folder-menu-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+}
+
+.folder-menu-new {
+  display: flex;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--card-border);
+}
+
+.folder-menu-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  font: inherit;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+}
+
+.folder-menu-new button {
+  padding: 5px 9px;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--folder-accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* --- Folder view: the translucent cluster square and dimmed background --- */
+.folder-zone {
+  position: absolute;
+  z-index: 1; /* above dimmed cards, below the members inside it */
+  /* Never intercepts a drag - drops are hit-tested against its geometry in
+     JS, which is what lets a dimmed card underneath it still be grabbed. */
+  pointer-events: none;
+  border: 2px solid var(--folder-accent);
+  border-radius: 18px;
+  background: rgba(31, 139, 76, 0.08);
+}
+
+.folder-zone-label {
+  position: absolute;
+  top: -12px;
+  left: 16px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--folder-accent);
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.card--dimmed {
+  opacity: 0.35;
+}
+
+.card--foldered {
+  z-index: 2;
 }
 
 #empty-state {

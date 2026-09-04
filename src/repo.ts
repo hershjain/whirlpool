@@ -36,6 +36,10 @@ export interface ItemView {
   createdAt: Date;
   canvasX: number | null;
   canvasY: number | null;
+  // The folder this item was filed into by hand, if any. Distinct from tags
+  // and category, which the model assigns.
+  folderId: string | null;
+  folderName: string | null;
 }
 
 const MAX_EXCERPT_LENGTH = 280;
@@ -73,7 +77,9 @@ function labelFor(item: Item): string {
   return item.rawText.length > 60 ? `${item.rawText.slice(0, 57)}...` : item.rawText;
 }
 
-async function toItemView(item: Item): Promise<ItemView> {
+async function toItemView(
+  item: Item & { folder?: { id: string; name: string } | null },
+): Promise<ItemView> {
   const run = await prisma.enrichmentRun.findFirst({
     where: { itemId: item.id },
     orderBy: { createdAt: "desc" },
@@ -100,6 +106,8 @@ async function toItemView(item: Item): Promise<ItemView> {
     createdAt: item.createdAt,
     canvasX: item.canvasX,
     canvasY: item.canvasY,
+    folderId: item.folder?.id ?? null,
+    folderName: item.folder?.name ?? null,
   };
 }
 
@@ -169,7 +177,11 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
 }
 
 export async function listAllItems(phone: string): Promise<ItemView[]> {
-  const items = await prisma.item.findMany({ where: { phone }, orderBy: { createdAt: "desc" } });
+  const items = await prisma.item.findMany({
+    where: { phone },
+    orderBy: { createdAt: "desc" },
+    include: { folder: true },
+  });
   return Promise.all(items.map(toItemView));
 }
 
@@ -186,4 +198,54 @@ export async function updateItemPosition(
     data: { canvasX: x, canvasY: y },
   });
   return result.count > 0;
+}
+
+// --- Folders: user-made collections, distinct from the model's tags/category ---
+
+export interface FolderView {
+  id: string;
+  name: string;
+  itemCount: number;
+}
+
+export async function listFolders(phone: string): Promise<FolderView[]> {
+  const folders = await prisma.folder.findMany({
+    where: { phone },
+    orderBy: { createdAt: "asc" },
+    include: { _count: { select: { items: true } } },
+  });
+  return folders.map((folder) => ({ id: folder.id, name: folder.name, itemCount: folder._count.items }));
+}
+
+// Files (or, with folderId null, unfiles) an item into a folder. Returns
+// false when the item isn't the owner's, or the target folder isn't -
+// either way nothing is written, so the caller can 404 without needing to
+// tell the two cases apart.
+export async function setItemFolder(phone: string, itemId: string, folderId: string | null): Promise<boolean> {
+  if (folderId !== null) {
+    const folder = await prisma.folder.findFirst({ where: { id: folderId, phone } });
+    if (!folder) return false;
+  }
+
+  const result = await prisma.item.updateMany({
+    where: { id: itemId, phone },
+    data: { folderId },
+  });
+  return result.count > 0;
+}
+
+// Idempotent on name (Folder is unique on [phone, name]) - double-submitting
+// "Research" from the tile menu returns the existing folder rather than
+// throwing on the constraint.
+export async function createFolder(phone: string, name: string): Promise<FolderView | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const folder = await prisma.folder.upsert({
+    where: { phone_name: { phone, name: trimmed } },
+    update: {},
+    create: { phone, name: trimmed },
+    include: { _count: { select: { items: true } } },
+  });
+  return { id: folder.id, name: folder.name, itemCount: folder._count.items };
 }
