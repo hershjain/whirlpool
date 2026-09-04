@@ -14,6 +14,8 @@ model Item {
   type            String // "link" | "note"
   rawUrl          String?
   title           String?
+  author          String? // byline / handle, e.g. "@paulg" or "Jane Smith"
+  siteName        String? // og:site_name, e.g. "The New York Times"
   rawText         String // as received in the SMS body
   extractedText   String? // best-effort extracted article/caption text
   contentFidelity String // "full_text" | "metadata_only" | "failed"
@@ -44,6 +46,22 @@ model EnrichmentRun {
   createdAt     DateTime @default(now())
 
   @@index([itemId])
+}
+
+// Per-hostname branding for the canvas cards - name, color, and a cached
+// logo, resolved once per site and reused for every item from it. Keyed by
+// normalized hostname ("www." stripped) so http/https and www variants share
+// one row.
+model SourceProfile {
+  hostname    String   @id
+  name        String // display name: "X", "YouTube", else the hostname
+  color       String // header bar color, "#RRGGBB"
+  textColor   String // "#ffffff" | "#000000" - precomputed for contrast on `color`
+  iconBase64  String? // cached logo bytes, base64-encoded
+  iconMime    String? // "image/png" | "image/svg+xml" | "image/x-icon" | ...
+  colorSource String // "curated" | "theme-color" | "manifest" | "icon" | "hash"
+  fetchFailed Boolean  @default(false)
+  fetchedAt   DateTime @default(now())
 }
 
 // Logged chat Q&A exchanges - same append-only logic, doubles as an eval set.

@@ -1,5 +1,6 @@
 import { prisma } from "./db.js";
 import { extractFromUrl } from "./linkExtract.js";
+import { resolveSourceProfileForCapture } from "./sourceProfile.js";
 import { enrichLink, enrichNote, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
 
@@ -68,11 +69,21 @@ async function handleSaveLink(
       type: "link",
       rawUrl: url,
       title: extraction.title,
+      author: extraction.author,
+      siteName: extraction.siteName,
       rawText,
       extractedText: extraction.extractedText,
       contentFidelity: extraction.contentFidelity,
       messageSid,
     },
+  });
+
+  // Best-effort - a dead favicon or a slow host should never cost the user
+  // their save. Runs after the item is already committed so a failure here
+  // just leaves the card with a neutral header until the next capture from
+  // this hostname retries it.
+  resolveSourceProfileForCapture(url).catch((error) => {
+    console.error(`Failed to resolve source profile for ${url}`, error);
   });
 
   if (extraction.contentFidelity === "failed" || !extraction.extractedText) {

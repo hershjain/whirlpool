@@ -8,6 +8,11 @@
   --accent: #1d5fd6;
   --tag-bg: #eaf1fd;
   --tag-text: #1d5fd6;
+  /* Header bar for a note, or a link whose source hasn't resolved yet -
+     everything else overrides these via --source-color/--source-text-color
+     set inline per card. */
+  --header-neutral: #e2e7f0;
+  --header-neutral-text: #4a5266;
 }
 
 * { box-sizing: border-box; }
@@ -72,12 +77,12 @@ html, body {
 
 .card {
   position: absolute;
-  width: 240px;
+  width: 240px; /* keep in sync with CARD_W in canvas.js */
   background: var(--card-bg);
   border: 1px solid var(--card-border);
-  border-radius: 10px;
+  border-radius: 14px;
+  overflow: hidden; /* clips the header bar to the card's rounded corners */
   box-shadow: 0 1px 3px rgba(20, 30, 60, 0.06);
-  padding: 14px 16px;
   cursor: grab;
   user-select: none;
 }
@@ -88,21 +93,50 @@ html, body {
   z-index: 5;
 }
 
-.card-image {
-  display: block;
-  width: 100%;
-  height: 120px;
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--source-color, var(--header-neutral));
+  color: var(--source-text-color, var(--header-neutral-text));
+}
+
+.card-source-name {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-logo {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
   object-fit: cover;
-  border-radius: 6px;
-  margin-bottom: 10px;
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.card-body {
+  padding: 14px 16px;
 }
 
 .card-title {
   font-weight: 600;
   font-size: 14px;
   line-height: 1.35;
-  margin: 0 0 6px;
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+
+.card-byline {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 10px;
   overflow-wrap: anywhere;
 }
 
@@ -112,6 +146,10 @@ html, body {
   line-height: 1.45;
   margin: 0 0 10px;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card-tags {

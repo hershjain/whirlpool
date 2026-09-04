@@ -62,13 +62,16 @@ viewport.addEventListener(
 
 // --- Loading and laying out items ---
 const GRID_COLS = 4;
-const CARD_W = 240;
+const CARD_W = 240; // keep in sync with `width` on .card in style.css
 const CARD_GAP = 32;
-const CARD_ROW_HEIGHT = 220;
+const CARD_ROW_HEIGHT = 300; // tall enough for a fully-clamped card + breathing room
 
 async function loadItems() {
-  const res = await fetch("/api/items");
-  const items = await res.json();
+  const [items, sources] = await Promise.all([
+    fetch("/api/items").then((res) => res.json()),
+    fetch("/api/sources").then((res) => res.json()),
+  ]);
+  const sourceByHostname = new Map(sources.map((source) => [source.hostname, source]));
 
   if (items.length === 0) {
     emptyState.hidden = false;
@@ -91,18 +94,45 @@ async function loadItems() {
   });
 
   for (const item of items) {
-    world.appendChild(renderCard(item));
+    const source = item.sourceHostname ? (sourceByHostname.get(item.sourceHostname) ?? null) : null;
+    world.appendChild(renderCard(item, source));
   }
 }
 
-function renderCard(item) {
+function renderCard(item, source) {
   const card = document.createElement("div");
   card.className = "card";
   card.style.left = `${item.canvasX}px`;
   card.style.top = `${item.canvasY}px`;
   card.dataset.id = item.id;
 
-  let html = `<div class="card-title">${escapeHtml(item.label)}</div>`;
+  // A hostname with a resolved profile gets its real brand color/logo; a
+  // hostname still awaiting first resolution, or a plain note, gets a
+  // neutral header rather than an empty or mismatched-looking one.
+  if (source) {
+    card.style.setProperty("--source-color", source.color);
+    card.style.setProperty("--source-text-color", source.textColor);
+  }
+
+  const headerName = source ? source.name : (item.sourceHostname ?? (item.rawUrl ? "Link" : "Note"));
+  const logo =
+    source && source.hasIcon
+      ? `<img class="card-logo" src="/api/sources/${encodeURIComponent(source.hostname)}/icon" alt="" />`
+      : "";
+
+  let html = `
+    <div class="card-header">
+      <span class="card-source-name">${escapeHtml(headerName)}</span>
+      ${logo}
+    </div>
+    <div class="card-body">
+      <div class="card-title">${escapeHtml(item.label)}</div>
+  `;
+
+  const byline = item.author || item.siteName || item.sourceHostname;
+  if (byline) {
+    html += `<div class="card-byline">${escapeHtml(byline)}</div>`;
+  }
   if (item.summary) {
     html += `<div class="card-summary">${escapeHtml(item.summary)}</div>`;
   }
@@ -111,6 +141,8 @@ function renderCard(item) {
       .map((tag) => `<span class="card-tag">${escapeHtml(tag)}</span>`)
       .join("")}</div>`;
   }
+  html += `</div>`;
+
   card.innerHTML = html;
 
   attachCardDrag(card, item);

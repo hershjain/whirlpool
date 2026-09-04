@@ -1,5 +1,6 @@
 import { prisma } from "./db.js";
 import type { Item, EnrichmentRun } from "@prisma/client";
+import { normalizeHostname } from "./sourceProfile.js";
 
 export interface ItemView {
   id: string;
@@ -8,6 +9,11 @@ export interface ItemView {
   // Best available display label: title, falling back to the URL, falling
   // back to a truncated snippet of the raw captured text (for notes).
   label: string;
+  author: string | null;
+  siteName: string | null;
+  // Normalized ("www."-stripped) hostname, joined client-side against
+  // GET /api/sources to look up that domain's card branding. Null for notes.
+  sourceHostname: string | null;
   summary: string | null;
   tags: string[];
   category: string | null;
@@ -33,6 +39,9 @@ async function toItemView(item: Item): Promise<ItemView> {
     title: item.title,
     rawUrl: item.rawUrl,
     label: labelFor(item),
+    author: item.author,
+    siteName: item.siteName,
+    sourceHostname: item.rawUrl ? normalizeHostname(item.rawUrl) : null,
     summary: run?.summary ?? null,
     tags: run ? (JSON.parse(run.tags) as string[]) : [],
     category: run?.category ?? null,
