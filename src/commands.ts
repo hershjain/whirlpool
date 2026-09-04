@@ -2,6 +2,7 @@ import { prisma } from "./db.js";
 import { extractFromUrl } from "./linkExtract.js";
 import { enrichLink, enrichNote, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
+import { ensureSiteProfile } from "./siteProfile.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
 
@@ -62,6 +63,12 @@ async function handleSaveLink(
 ): Promise<null> {
   const extraction = await extractFromUrl(url);
 
+  // Cosmetic and non-throwing by design: a failed favicon must not fail a save.
+  await ensureSiteProfile(url, {
+    faviconUrl: extraction.faviconUrl,
+    themeColor: extraction.themeColor,
+  });
+
   const item = await prisma.item.create({
     data: {
       phone,
@@ -71,6 +78,7 @@ async function handleSaveLink(
       rawText,
       extractedText: extraction.extractedText,
       contentFidelity: extraction.contentFidelity,
+      imageUrl: extraction.imageUrl,
       messageSid,
     },
   });

@@ -25,6 +25,10 @@ model Item {
   canvasX Float?
   canvasY Float?
 
+  // Hero image for this specific page (og:image). Stored as a URL, not bytes -
+  // these run 100KB-2MB and don't belong in SQLite.
+  imageUrl String?
+
   enrichmentRuns EnrichmentRun[]
 }
 
@@ -59,6 +63,16 @@ model ChatTurn {
   outputTokens  Int
   messageSid    String   @unique
   createdAt     DateTime @default(now())
+}
+
+// Per-domain visual cache. Keyed by domain rather than item so saving ten
+// links from one site fetches one favicon, not ten copies of the same blob.
+model SiteProfile {
+  domain         String   @id // "www.instagram.com"
+  faviconDataUri String? // data:image/png;base64,... - small, so inlined
+  accentColor    String? // resolved hex, e.g. "#E1306C"
+  colorSource    String? // "theme-color" | "favicon" | "domain-hash"
+  fetchedAt      DateTime @default(now())
 }
 
 // Guards against Twilio webhook retries double-processing the same inbound

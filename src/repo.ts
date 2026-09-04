@@ -1,5 +1,10 @@
 import { prisma } from "./db.js";
 import type { Item, EnrichmentRun } from "@prisma/client";
+import { domainOf, getSiteProfiles } from "./siteProfile.js";
+
+// Notes aren't tied to a site, so their bar colour is a constant rather than
+// something resolved and cached per domain.
+export const NOTE_ACCENT_COLOR = "#F7E7A6";
 
 export interface ItemView {
   id: string;
@@ -15,7 +20,22 @@ export interface ItemView {
   createdAt: Date;
   canvasX: number | null;
   canvasY: number | null;
+  imageUrl: string | null;
+  // Resolved from the per-domain SiteProfile cache (or constant, for notes).
+  domain: string | null;
+  faviconDataUri: string | null;
+  accentColor: string | null;
+  // "theme-color" | "favicon" | "domain-hash" | null. When this is
+  // "domain-hash" and a favicon exists, the frontend derives a better colour
+  // from the icon and writes it back.
+  colorSource: string | null;
 }
+
+type SiteProfileView = {
+  faviconDataUri: string | null;
+  accentColor: string | null;
+  colorSource: string | null;
+};
 
 function labelFor(item: Item): string {
   if (item.title) return item.title;
@@ -23,11 +43,12 @@ function labelFor(item: Item): string {
   return item.rawText.length > 60 ? `${item.rawText.slice(0, 57)}...` : item.rawText;
 }
 
-async function toItemView(item: Item): Promise<ItemView> {
+async function toItemView(item: Item, profile?: SiteProfileView): Promise<ItemView> {
   const run = await prisma.enrichmentRun.findFirst({
     where: { itemId: item.id },
     orderBy: { createdAt: "desc" },
   });
+  const isNote = item.type === "note";
   return {
     id: item.id,
     title: item.title,
@@ -40,7 +61,24 @@ async function toItemView(item: Item): Promise<ItemView> {
     createdAt: item.createdAt,
     canvasX: item.canvasX,
     canvasY: item.canvasY,
+    imageUrl: item.imageUrl,
+    domain: item.rawUrl ? domainOf(item.rawUrl) : null,
+    faviconDataUri: isNote ? null : (profile?.faviconDataUri ?? null),
+    accentColor: isNote ? NOTE_ACCENT_COLOR : (profile?.accentColor ?? null),
+    colorSource: isNote ? "note" : (profile?.colorSource ?? null),
   };
+}
+
+// Resolves every item's site profile in one query rather than one per item.
+async function toItemViews(items: Item[]): Promise<ItemView[]> {
+  const domains = [...new Set(items.map((i) => (i.rawUrl ? domainOf(i.rawUrl) : null)).filter((d): d is string => Boolean(d)))];
+  const profiles = await getSiteProfiles(domains);
+  return Promise.all(
+    items.map((item) => {
+      const domain = item.rawUrl ? domainOf(item.rawUrl) : null;
+      return toItemView(item, domain ? profiles.get(domain) : undefined);
+    }),
+  );
 }
 
 export async function listRecentItems(phone: string, limit = 5): Promise<ItemView[]> {
@@ -49,7 +87,7 @@ export async function listRecentItems(phone: string, limit = 5): Promise<ItemVie
     orderBy: { createdAt: "desc" },
     take: limit,
   });
-  return Promise.all(items.map(toItemView));
+  return toItemViews(items);
 }
 
 // Words carrying no signal about *what* was saved - dropping them stops a
@@ -93,7 +131,7 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
   // nothing. A query that *does* have real terms but matches nothing returns
   // empty - better an honest "nothing found" than unrelated items.
   if (tokens.length === 0) {
-    return Promise.all(items.slice(0, limit).map(toItemView));
+    return toItemViews(items.slice(0, limit));
   }
 
   const scored = items
@@ -105,12 +143,12 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  return Promise.all(scored.slice(0, limit).map((entry) => toItemView(entry.item)));
+  return toItemViews(scored.slice(0, limit).map((entry) => entry.item));
 }
 
 export async function listAllItems(phone: string): Promise<ItemView[]> {
   const items = await prisma.item.findMany({ where: { phone }, orderBy: { createdAt: "desc" } });
-  return Promise.all(items.map(toItemView));
+  return toItemViews(items);
 }
 
 // Scoped to `phone` so a canvas request can never move another user's item,

@@ -77,9 +77,37 @@ html, body {
   border: 1px solid var(--card-border);
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(20, 30, 60, 0.06);
-  padding: 14px 16px;
   cursor: grab;
   user-select: none;
+  /* Clips the accent bar to the rounded top corners. */
+  overflow: hidden;
+}
+
+/* The site's brand colour (or pastel yellow for notes). */
+.card-bar {
+  height: 6px;
+  width: 100%;
+  background: var(--card-border);
+}
+
+.card-body {
+  padding: 14px 16px;
+}
+
+.card-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+.card-favicon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  object-fit: contain;
 }
 
 .card.dragging {
@@ -102,7 +130,6 @@ html, body {
   font-weight: 600;
   font-size: 14px;
   line-height: 1.35;
-  margin: 0 0 6px;
   overflow-wrap: anywhere;
 }
 

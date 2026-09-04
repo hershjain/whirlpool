@@ -93,7 +93,95 @@ async function loadItems() {
   for (const item of items) {
     world.appendChild(renderCard(item));
   }
+
+  refineAccentColors(items);
 }
+
+// Domains that fell back to a hashed colour but do have a favicon: derive the
+// real dominant colour from the icon and cache it server-side. Runs once per
+// domain, after paint, so it never blocks the initial render.
+function refineAccentColors(items) {
+  const pending = new Map();
+  for (const item of items) {
+    if (item.colorSource !== "domain-hash") continue;
+    if (!item.faviconDataUri || !item.domain) continue;
+    if (!pending.has(item.domain)) pending.set(item.domain, item.faviconDataUri);
+  }
+
+  for (const [domain, dataUri] of pending) {
+    dominantColor(dataUri)
+      .then((hex) => {
+        if (!hex) return;
+        applyAccentToDomain(domain, hex);
+        return fetch(`/api/sites/${encodeURIComponent(domain)}/color`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ color: hex }),
+        });
+      })
+      .catch((error) => console.error("Colour refinement failed for", domain, error));
+  }
+}
+
+function applyAccentToDomain(domain, hex) {
+  for (const card of world.children) {
+    if (card.dataset.domain !== domain) continue;
+    const bar = card.querySelector(".card-bar");
+    if (bar) bar.style.background = hex;
+  }
+}
+
+// A data: URI is same-origin, so the canvas isn't tainted and getImageData
+// works - which is the whole reason favicons are cached as data URIs.
+function dominantColor(dataUri) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onerror = () => resolve(null);
+    img.onload = () => {
+      try {
+        const size = 32;
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, size, size);
+        const { data } = ctx.getImageData(0, 0, size, size);
+
+        const buckets = new Map();
+        for (let i = 0; i < data.length; i += 4) {
+          const [r, g, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+          if (a < 128) continue; // transparent padding
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          if (max > 240 && min > 240) continue; // near-white
+          if (max < 24) continue; // near-black
+          // Quantise so near-identical shades group together.
+          const key = `${r >> 4},${g >> 4},${b >> 4}`;
+          const entry = buckets.get(key) ?? { count: 0, r: 0, g: 0, b: 0 };
+          entry.count++;
+          entry.r += r;
+          entry.g += g;
+          entry.b += b;
+          buckets.set(key, entry);
+        }
+
+        let best = null;
+        for (const entry of buckets.values()) {
+          if (!best || entry.count > best.count) best = entry;
+        }
+        if (!best) return resolve(null);
+
+        const toHex = (v) => Math.round(v / best.count).toString(16).padStart(2, "0");
+        resolve(`#${toHex(best.r)}${toHex(best.g)}${toHex(best.b)}`);
+      } catch (error) {
+        resolve(null);
+      }
+    };
+    img.src = dataUri;
+  });
+}
+
+const FALLBACK_ACCENT = "#c7cede";
 
 function renderCard(item) {
   const card = document.createElement("div");
@@ -101,8 +189,23 @@ function renderCard(item) {
   card.style.left = `${item.canvasX}px`;
   card.style.top = `${item.canvasY}px`;
   card.dataset.id = item.id;
+  if (item.domain) card.dataset.domain = item.domain;
 
-  let html = `<div class="card-title">${escapeHtml(item.label)}</div>`;
+  const accent = item.accentColor || FALLBACK_ACCENT;
+  let html = `<div class="card-bar" style="background:${escapeHtml(accent)}"></div>`;
+  html += `<div class="card-body">`;
+
+  if (item.imageUrl) {
+    // Some hosts block hotlinking; drop the image rather than show a broken one.
+    html += `<img class="card-image" src="${escapeHtml(item.imageUrl)}" alt="" onerror="this.remove()" />`;
+  }
+
+  html += `<div class="card-heading">`;
+  if (item.faviconDataUri) {
+    html += `<img class="card-favicon" src="${escapeHtml(item.faviconDataUri)}" alt="" onerror="this.remove()" />`;
+  }
+  html += `<span class="card-title">${escapeHtml(item.label)}</span></div>`;
+
   if (item.summary) {
     html += `<div class="card-summary">${escapeHtml(item.summary)}</div>`;
   }
@@ -111,6 +214,7 @@ function renderCard(item) {
       .map((tag) => `<span class="card-tag">${escapeHtml(tag)}</span>`)
       .join("")}</div>`;
   }
+  html += `</div>`;
   card.innerHTML = html;
 
   attachCardDrag(card, item);

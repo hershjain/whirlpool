@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { config } from "./config.js";
 import { listAllItems, updateItemPosition } from "./repo.js";
+import { updateSiteColor } from "./siteProfile.js";
 
 export const canvasRouter: Router = Router();
 
@@ -24,6 +25,26 @@ canvasRouter.patch("/items/:id/position", async (req, res) => {
   const updated = await updateItemPosition(config.ownerPhoneNumber, id, x, y);
   if (!updated) {
     res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  res.status(204).end();
+});
+
+// The browser derives a dominant colour from the cached favicon (it decodes
+// .ico/.svg/.png natively, which Node can't without an image dependency) and
+// writes it back here so the work happens once per domain, not per page load.
+canvasRouter.patch("/sites/:domain/color", async (req, res) => {
+  const { domain } = req.params;
+  const { color } = req.body as { color?: unknown };
+
+  if (typeof color !== "string") {
+    res.status(400).json({ error: "color must be a hex string" });
+    return;
+  }
+
+  const updated = await updateSiteColor(domain, color);
+  if (!updated) {
+    res.status(404).json({ error: "Unknown domain or invalid colour" });
     return;
   }
   res.status(204).end();
