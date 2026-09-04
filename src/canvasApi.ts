@@ -23,7 +23,9 @@ canvasRouter.get("/sources", async (_req, res) => {
       name: profile.name,
       color: profile.color,
       textColor: profile.textColor,
-      hasIcon: profile.iconBase64 !== null,
+      // Both fields, matching the icon route's own 404 condition below - a
+      // hasIcon that the endpoint then refuses would render a broken image.
+      hasIcon: profile.iconBase64 !== null && profile.iconMime !== null,
     })),
   );
 });

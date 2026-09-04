@@ -4,15 +4,27 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Whirlpool</title>
+  <!-- Inter stands in for X's Chirp, which is proprietary to X and served only
+       from their CDN under hash-named files that change on every deploy. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="toolbar">
     <span id="toolbar-title">Whirlpool</span>
     <span id="toolbar-hint">Drag to move · Scroll to zoom · Click a card to open it</span>
+    <button type="button" id="filter-toggle" aria-expanded="true" aria-controls="filter-bar">Filters</button>
   </div>
+  <div id="filter-bar"></div>
   <div id="viewport">
     <div id="world"></div>
+  </div>
+  <div id="zoom-controls">
+    <button type="button" data-zoom="out" aria-label="Zoom out">&minus;</button>
+    <button type="button" data-zoom="reset" id="zoom-level" aria-label="Reset zoom to 100%">100%</button>
+    <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
   </div>
   <div id="empty-state" hidden>Nothing saved yet — text Whirlpool a link or a thought to get started.</div>
   <script src="/canvas.js"></script>

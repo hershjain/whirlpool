@@ -1,38 +1,15 @@
 // One-off script: warms SourceProfile for every hostname already saved, so
 // the first canvas load after this ships isn't a wall of neutral headers.
-// Safe to re-run - resolveSourceProfileForCapture is a no-op for any
-// hostname whose cached profile is still fresh.
+// Safe to re-run - a hostname whose cached profile is still fresh is skipped.
+// The server runs the same sweep on startup, so this is only needed to force
+// a fill-in without a restart.
 import { prisma } from "./db.js";
-import { resolveSourceProfileForCapture } from "./sourceProfile.js";
+import { resolveMissingSourceProfiles } from "./sourceProfile.js";
 
 async function main() {
-  const items = await prisma.item.findMany({
-    where: { rawUrl: { not: null } },
-    select: { rawUrl: true },
-  });
-
-  // One representative URL per hostname - resolveSourceProfileForCapture
-  // caches by hostname, so resolving twice for the same one is wasted work.
-  const urlByHostname = new Map<string, string>();
-  for (const { rawUrl } of items) {
-    if (!rawUrl) continue;
-    try {
-      urlByHostname.set(new URL(rawUrl).hostname, rawUrl);
-    } catch {
-      // malformed URL slipped through capture - nothing to resolve
-    }
-  }
-
-  console.log(`Resolving source profiles for ${urlByHostname.size} hostname(s)...`);
-
-  for (const rawUrl of urlByHostname.values()) {
-    const profile = await resolveSourceProfileForCapture(rawUrl);
-    if (profile) {
-      console.log(`  ${profile.hostname} -> ${profile.name} (${profile.color}, via ${profile.colorSource})`);
-    }
-  }
-
-  console.log("Done.");
+  console.log("Resolving source profiles for hostnames without a fresh one...");
+  const resolved = await resolveMissingSourceProfiles();
+  console.log(`Done - ${resolved} resolved.`);
 }
 
 main()

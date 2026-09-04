@@ -13,6 +13,10 @@
      set inline per card. */
   --header-neutral: #e2e7f0;
   --header-neutral-text: #4a5266;
+  /* Notes have no source to brand them - a legal-pad yellow marks them as
+     the user's own writing rather than something saved from a site. */
+  --note-color: #fbf3c4;
+  --note-text-color: #4a4326;
 }
 
 * { box-sizing: border-box; }
@@ -53,6 +57,74 @@ html, body {
   color: var(--muted);
 }
 
+#filter-toggle {
+  margin-left: auto;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#filter-toggle:hover {
+  color: var(--text);
+}
+
+/* Sits directly under the 48px toolbar, overlaying the canvas the same way. */
+#filter-bar {
+  position: fixed;
+  top: 48px;
+  left: 0;
+  right: 0;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--card-border);
+  user-select: none;
+}
+
+/* Same visual language as .card-tag so the bar reads as native. */
+.filter-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tag-text);
+  background: var(--tag-bg);
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.filter-chip:hover {
+  border-color: var(--accent);
+}
+
+.filter-chip.is-active {
+  color: #fff;
+  background: var(--accent);
+}
+
+.filter-count {
+  font-weight: 500;
+  opacity: 0.65;
+}
+
+.filter-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--card-border);
+}
+
 #viewport {
   position: absolute;
   inset: 0;
@@ -79,10 +151,11 @@ html, body {
   position: absolute;
   width: 240px; /* keep in sync with CARD_W in canvas.js */
   background: var(--card-bg);
-  border: 1px solid var(--card-border);
   border-radius: 14px;
   overflow: hidden; /* clips the header bar to the card's rounded corners */
-  box-shadow: 0 1px 3px rgba(20, 30, 60, 0.06);
+  /* No outline - the shadow alone separates the tile from the dotted canvas,
+     so it carries more weight than it did behind a border. */
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
   cursor: grab;
   user-select: none;
 }
@@ -91,6 +164,55 @@ html, body {
   cursor: grabbing;
   box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
   z-index: 5;
+}
+
+/* Floating zoom controls, bottom right - same translucent treatment as the
+   toolbar so they read as chrome rather than as content on the canvas. */
+#zoom-controls {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
+}
+
+#zoom-controls button {
+  min-width: 34px;
+  padding: 7px 4px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+#zoom-controls button:hover {
+  background: var(--tag-bg);
+}
+
+#zoom-level {
+  min-width: 54px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums; /* stops the width jittering while zooming */
+  color: var(--muted);
+  border-left: 1px solid var(--card-border);
+  border-right: 1px solid var(--card-border);
+}
+
+/* Inter in place of Chirp on tweet cards only - see index.html. */
+.card--tweet .card-excerpt,
+.card--tweet .card-byline {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.01em;
 }
 
 .card-header {
@@ -118,7 +240,8 @@ html, body {
   height: 20px;
   border-radius: 50%;
   object-fit: cover;
-  background: rgba(255, 255, 255, 0.9);
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 
 /* Flush to the card's edges - .card's overflow:hidden clips it to the
@@ -130,6 +253,16 @@ html, body {
   height: 132px;
   object-fit: cover;
   background: var(--bg);
+  /* Without this the browser's native image drag lifts the picture off the
+     tile; the card's own pointer drag never gets the gesture. */
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Posts, reels and image blocks are the image - give it room. Articles keep
+   the shorter .card-hero band above their summary. */
+.card-hero--tall {
+  height: 240px;
 }
 
 .card-body {
@@ -151,6 +284,36 @@ html, body {
   overflow-wrap: anywhere;
 }
 
+/* Attribution beneath a post's own words, rather than above a headline. */
+.card-byline--under {
+  margin: 8px 0 10px;
+}
+
+/* The item's own words. The rule down the left marks it as quoted material -
+   what the tweet or caption actually says - as against the summary below,
+   which is written *about* the item and stays flush and grey. */
+.card-excerpt {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.45;
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--card-border);
+  overflow-wrap: anywhere;
+  white-space: pre-line; /* captions carry their own line breaks */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A note is the user's own writing - nothing to distinguish it from, so no
+   rule and no indent. */
+.card-excerpt--plain {
+  padding-left: 0;
+  border-left: none;
+}
+
 .card-summary {
   font-size: 12.5px;
   color: var(--muted);
@@ -161,6 +324,56 @@ html, body {
   -webkit-line-clamp: 5;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Expanded: drop the clamps and lift the tile over its neighbours. Cards are
+   absolutely positioned, so growing one moves nothing else. */
+.card--expanded {
+  z-index: 6;
+}
+
+.card--expanded .card-excerpt,
+.card--expanded .card-summary {
+  display: block;
+  -webkit-line-clamp: none;
+  overflow: visible;
+}
+
+.card-expand {
+  display: block;
+  width: fit-content;
+  margin: -4px 0 10px auto; /* auto left margin pushes it to the card's right edge */
+  padding: 1px 8px 3px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.card-expand:hover {
+  color: var(--text);
+}
+
+.card--broken .card-hero {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.card-broken {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #8a2b2b;
+  background: #fdecec;
+  border-radius: 4px;
 }
 
 .card-tags {

@@ -1,7 +1,7 @@
 import { prisma } from "./db.js";
 import { extractFromUrl } from "./linkExtract.js";
 import { resolveSourceProfileForCapture } from "./sourceProfile.js";
-import { enrichLink, enrichNote, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
+import { enrichLink, enrichNote, enrichmentInput, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
@@ -75,23 +75,31 @@ async function handleSaveLink(
       rawText,
       extractedText: extraction.extractedText,
       contentFidelity: extraction.contentFidelity,
+      linkStatus: extraction.httpStatus,
       messageSid,
     },
   });
 
-  // Best-effort - a dead favicon or a slow host should never cost the user
-  // their save. Runs after the item is already committed so a failure here
-  // just leaves the card with a neutral header until the next capture from
-  // this hostname retries it.
-  resolveSourceProfileForCapture(url).catch((error) => {
+  // Awaited, so the profile is in place before the item can be rendered -
+  // fire-and-forget left a race where the card drew with a neutral header and
+  // kept it until a manual reload. Capture is silent and already runs in the
+  // background, so nobody is waiting on the extra few seconds. Still
+  // best-effort: the item is committed above, so a dead favicon or a slow
+  // host costs branding, never the save itself.
+  try {
+    await resolveSourceProfileForCapture(url);
+  } catch (error) {
     console.error(`Failed to resolve source profile for ${url}`, error);
-  });
+  }
 
-  if (extraction.contentFidelity === "failed" || !extraction.extractedText) {
+  // A save with no body text can still be worth tagging when it has a real
+  // title - an are.na image block, say. See enrichmentInput.
+  const enrichmentText = enrichmentInput(extraction.extractedText, extraction.title);
+  if (!enrichmentText) {
     return null;
   }
 
-  const enrichment = await enrichLink(extraction.extractedText);
+  const enrichment = await enrichLink(enrichmentText);
   await prisma.enrichmentRun.create({
     data: {
       itemId: item.id,
@@ -122,6 +130,8 @@ async function handleSaveNote(phone: string, text: string, messageSid: string): 
     },
   });
 
+  // The summary this produces is never rendered - notes show raw text. Tags
+  // and category are the point: they put notes in the canvas filter bar.
   const enrichment = await enrichNote(text);
   await prisma.enrichmentRun.create({
     data: {

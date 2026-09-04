@@ -22,6 +22,10 @@ model Item {
   rawText         String // as received in the SMS body
   extractedText   String? // best-effort extracted article/caption text
   contentFidelity String // "full_text" | "metadata_only" | "failed"
+  // HTTP status from the last fetch of rawUrl. 404/410 means the page is gone,
+  // which the card surfaces - a dead save is worth knowing about rather than
+  // silently showing an empty tile. Null when never checked.
+  linkStatus      Int?
   messageSid      String   @unique
   createdAt       DateTime @default(now())
 

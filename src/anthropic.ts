@@ -33,6 +33,9 @@ function formatItemForModel(item: ItemView) {
     title: item.label,
     url: item.rawUrl,
     summary: item.summary,
+    // Notes carry no summary by design, so without this a note would reach the
+    // model as nothing but its 60-character truncated label.
+    excerpt: item.excerpt,
     tags: item.tags,
     category: item.category,
     content_fidelity: item.contentFidelity,
@@ -97,10 +100,35 @@ async function runEnrichment(text: string, prompt: Prompt): Promise<EnrichmentRe
   };
 }
 
+const MIN_TITLE_ENRICHMENT_LENGTH = 12;
+const FILENAME_LIKE = /^[\w .\-]+\.(png|jpe?g|gif|webp|svg|pdf|mp4|mov|heic)$/i;
+
+// Some saves carry no body text at all - an are.na image block is just a
+// picture. A real title ("Anne Collier, Questions (Connection) 2011") is still
+// enough to tag and categorize by; an untitled upload whose title is the
+// filename it was dragged in as ("image.png") is not, and enriching that
+// produces confident nonsense.
+export function enrichmentInput(extractedText: string | null, title: string | null): string | null {
+  const text = extractedText?.trim();
+  if (text) return text;
+
+  const trimmed = title?.trim();
+  if (!trimmed) return null;
+
+  // Titles often carry a " | Site Name" suffix; judge the leading segment.
+  const leading = trimmed.split(" | ")[0].trim();
+  if (FILENAME_LIKE.test(leading)) return null;
+  if (leading.length < MIN_TITLE_ENRICHMENT_LENGTH) return null;
+  return leading;
+}
+
 export function enrichLink(extractedText: string): Promise<EnrichmentResult> {
   return runEnrichment(extractedText, enrichLinkPrompt);
 }
 
+// Notes are rendered raw on the canvas - this summary is generated but never
+// shown. Tags and category are what earn the call: they put notes in the
+// filter bar and give chat search something better than literal text to match.
 export function enrichNote(text: string): Promise<EnrichmentResult> {
   return runEnrichment(text, enrichNotePrompt);
 }

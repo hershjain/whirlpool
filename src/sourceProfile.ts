@@ -1,8 +1,11 @@
 import { JSDOM } from "jsdom";
 import sharp from "sharp";
+import type { Sharp } from "sharp";
+import decodeIco from "decode-ico";
 import type { SourceProfile } from "@prisma/client";
 import { prisma } from "./db.js";
-import { fetchWithTimeout, BROWSER_USER_AGENT } from "./httpFetch.js";
+import { fetchWithTimeout, BROWSER_PAGE_HEADERS, BROWSER_IMAGE_HEADERS } from "./httpFetch.js";
+import { cleanWhitespace } from "./linkExtract.js";
 
 // Resolves the branding (name, color, cached logo) shown on a card's header
 // bar, for any hostname on the internet. A user can save a link from any
@@ -13,8 +16,8 @@ import { fetchWithTimeout, BROWSER_USER_AGENT } from "./httpFetch.js";
 //
 // Resolution order for color:
 //   1. curated map            (x.com, youtube.com, reddit.com, ...)
-//   2. <meta name="theme-color">
-//   3. web app manifest's theme_color
+//   2. <meta name="theme-color">        - unless near-white/near-black
+//   3. web app manifest's theme_color   - unless near-white/near-black
 //   4. dominant color sampled from the site's own favicon
 //   5. a color hashed from the hostname (stable, never fails)
 //
@@ -102,7 +105,7 @@ function isTwitterHost(hostname: string): boolean {
 
 async function fetchPageDom(rawUrl: string): Promise<JSDOM | null> {
   try {
-    const res = await fetchWithTimeout(rawUrl, { headers: { "User-Agent": BROWSER_USER_AGENT } });
+    const res = await fetchWithTimeout(rawUrl, { headers: BROWSER_PAGE_HEADERS });
     if (!res.ok) return null;
     const html = await res.text();
     return new JSDOM(html, { url: rawUrl });
@@ -133,35 +136,102 @@ export async function resolveSourceProfileForCapture(rawUrl: string): Promise<So
   return resolveSourceProfile(url, dom);
 }
 
+// Fills in every hostname that has no usable profile yet. Shared by the CLI
+// backfill and the server's startup sweep so both close gaps identically -
+// items saved before this feature existed, and any capture whose resolution
+// failed at the time. Serial on purpose: it's a handful of hostnames, and
+// there's no reason to hit several sites at once on boot.
+export async function resolveMissingSourceProfiles(): Promise<number> {
+  const items = await prisma.item.findMany({
+    where: { rawUrl: { not: null } },
+    select: { rawUrl: true },
+  });
+
+  // Keyed by *normalized* hostname, matching how profiles are stored - so
+  // "www.x.com" and "x.com" resolve once between them, not twice.
+  const urlByHostname = new Map<string, string>();
+  for (const { rawUrl } of items) {
+    if (!rawUrl) continue;
+    const hostname = normalizeHostname(rawUrl);
+    if (hostname && !urlByHostname.has(hostname)) urlByHostname.set(hostname, rawUrl);
+  }
+
+  let resolved = 0;
+  for (const [hostname, rawUrl] of urlByHostname) {
+    const cached = await prisma.sourceProfile.findUnique({ where: { hostname } });
+    if (cached && isFresh(cached)) continue;
+
+    try {
+      const profile = await resolveSourceProfileForCapture(rawUrl);
+      if (profile) {
+        resolved++;
+        console.log(`  ${profile.hostname} -> ${profile.name} (${profile.color}, via ${profile.colorSource})`);
+      }
+    } catch (error) {
+      // One dead host must not stop the sweep for the rest.
+      console.error(`  failed to resolve ${hostname}`, error);
+    }
+  }
+  return resolved;
+}
+
 type BuiltProfile = Omit<SourceProfile, "hostname">;
 
 async function buildSourceProfile(hostname: string, dom: JSDOM | null): Promise<BuiltProfile> {
   const curated = curatedFor(hostname);
-  const signals = dom ? await gatherPageSignals(dom.window.document) : { iconCandidates: [], themeColor: null, manifestThemeColor: null };
+  const signals = dom ? await gatherPageSignals(dom.window.document) : NO_SIGNALS;
 
   const icon = await fetchIcon(hostname, signals.iconCandidates);
-  const iconColor = icon ? await dominantColor(icon.bytes) : null;
+  const pixels = icon ? await iconPixels(icon.bytes) : null;
+  const iconColor = pixels ? dominantColor(pixels) : null;
+
+  const themeColor = brandColor(signals.themeColor);
+  const manifestColor = brandColor(signals.manifestThemeColor);
 
   const [color, colorSource]: [string, string] = curated
     ? [curated.color, "curated"]
-    : signals.themeColor
-      ? [signals.themeColor, "theme-color"]
-      : signals.manifestThemeColor
-        ? [signals.manifestThemeColor, "manifest"]
+    : themeColor
+      ? [themeColor, "theme-color"]
+      : manifestColor
+        ? [manifestColor, "manifest"]
         : iconColor
           ? [iconColor, "icon"]
           : [hashToColor(hostname), "hash"];
 
+  // Only moves the color when the logo would otherwise be invisible on it.
+  const barColor = pixels ? shiftBarAwayFromLogo(color, pixels) : color;
+
   return {
-    name: curated?.name ?? hostname,
-    color,
-    textColor: textColorFor(color),
+    // og:site_name reads far better in the header bar than a bare hostname
+    // ("AP News", not "apnews.com") for everything the curated map misses.
+    name: curated?.name ?? signals.ogSiteName ?? hostname,
+    color: barColor,
+    textColor: textColorFor(barColor),
     iconBase64: icon ? icon.bytes.toString("base64") : null,
     iconMime: icon?.mime ?? null,
     colorSource,
-    fetchFailed: icon === null,
+    // A hash color means the ladder found nothing real, which is just as
+    // much a failure as a missing icon - mark it so the 24h retry window
+    // applies instead of freezing the guess in place for a month.
+    fetchFailed: icon === null || colorSource === "hash",
     fetchedAt: new Date(),
   };
+}
+
+// theme-color and a manifest's theme_color describe *browser chrome*, not a
+// brand: sites set them to their page background, which is usually white -
+// are.na sends "#FFF", Instagram "#ffffff". Taken at face value that paints a
+// white bar on an already-white card, so a near-neutral value is skipped in
+// favour of the color sampled from the logo. Only these two rungs are
+// filtered: a curated "#000000" and a monochrome logo sample are deliberate.
+function isNearNeutral(hexColor: string): boolean {
+  const hex = hexColor.replace("#", "");
+  const [r, g, b] = [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map((c) => parseInt(c, 16));
+  return (r > 235 && g > 235 && b > 235) || (r < 20 && g < 20 && b < 20);
+}
+
+function brandColor(value: string | null): string | null {
+  return value && !isNearNeutral(value) ? value : null;
 }
 
 // --- Reading the page's own metadata for icon candidates + theme colors ---
@@ -170,7 +240,15 @@ interface PageSignals {
   iconCandidates: string[];
   themeColor: string | null;
   manifestThemeColor: string | null;
+  ogSiteName: string | null;
 }
+
+const NO_SIGNALS: PageSignals = {
+  iconCandidates: [],
+  themeColor: null,
+  manifestThemeColor: null,
+  ogSiteName: null,
+};
 
 function iconArea(sizesAttr: string | null | undefined): number {
   if (!sizesAttr || sizesAttr === "any") return 0;
@@ -222,7 +300,13 @@ async function gatherPageSignals(doc: Document): Promise<PageSignals> {
   const pngIcon = largestLinkHref(pngIcons);
   if (pngIcon) iconCandidates.push(pngIcon);
 
-  const themeColor = normalizeColor(doc.querySelector('meta[name="theme-color"]')?.getAttribute("content") ?? null);
+  // A page often ships several theme-colors scoped by media query. Taking
+  // the first match blindly picks the dark-mode value on any site that lists
+  // it first, so prefer the unscoped tag - that's the light-mode default.
+  const themeColorMeta =
+    doc.querySelector('meta[name="theme-color"]:not([media])') ??
+    doc.querySelector('meta[name="theme-color"]');
+  const themeColor = normalizeColor(themeColorMeta?.getAttribute("content") ?? null);
 
   const manifestLink = doc.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
   let manifestThemeColor: string | null = null;
@@ -235,7 +319,9 @@ async function gatherPageSignals(doc: Document): Promise<PageSignals> {
   const anyIcon = largestLinkHref([...doc.querySelectorAll('link[rel~="icon"]')] as HTMLLinkElement[]);
   if (anyIcon) iconCandidates.push(anyIcon);
 
-  return { iconCandidates, themeColor, manifestThemeColor };
+  const ogSiteName = cleanWhitespace(doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content"));
+
+  return { iconCandidates, themeColor, manifestThemeColor, ogSiteName };
 }
 
 // --- Fetching and caching the icon bytes ---
@@ -245,36 +331,49 @@ interface FetchedIcon {
   mime: string;
 }
 
-function mimeFromUrl(iconUrl: string): string {
-  const ext = iconUrl.split("?")[0].split(".").pop()?.toLowerCase();
-  switch (ext) {
-    case "png":
-      return "image/png";
-    case "svg":
-      return "image/svg+xml";
-    case "ico":
-      return "image/x-icon";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "webp":
-      return "image/webp";
-    default:
-      return "image/png";
+const ICO_MAGIC = "00000100";
+
+// A favicon URL's extension lies and its Content-Type is often missing or a
+// generic octet-stream, so identify the bytes themselves. Without this a soft
+// 404 gets stored as a logo and served back as a broken image - linkedin.com's
+// /favicon.ico really does return 20KB of HTML, comfortably under the size cap.
+function sniffImageMime(bytes: Buffer): string | null {
+  if (bytes.length < 12) return null;
+  const magic = bytes.subarray(0, 4).toString("hex");
+  if (magic === "89504e47") return "image/png";
+  if (magic.startsWith("ffd8ff")) return "image/jpeg";
+  if (magic === ICO_MAGIC) return "image/x-icon";
+  if (bytes.subarray(0, 3).toString("latin1") === "GIF") return "image/gif";
+  if (bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP") {
+    return "image/webp";
   }
+  // SVG is text, so it has no magic number - require an actual <svg tag
+  // rather than trusting a leading "<", which every HTML error page has too.
+  const head = bytes.subarray(0, 512).toString("utf8").trimStart().toLowerCase();
+  if (head.startsWith("<svg") || (head.startsWith("<?xml") && head.includes("<svg"))) return "image/svg+xml";
+  return null;
 }
 
 async function downloadIcon(iconUrl: string): Promise<FetchedIcon | null> {
   try {
     const res = await fetchWithTimeout(iconUrl, {
-      headers: { "User-Agent": BROWSER_USER_AGENT },
+      headers: BROWSER_IMAGE_HEADERS,
       timeoutMs: ICON_FETCH_TIMEOUT_MS,
     });
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.byteLength === 0 || buffer.byteLength > MAX_ICON_BYTES) return null;
-    const contentType = res.headers.get("content-type")?.split(";")[0]?.trim();
-    return { bytes: buffer, mime: contentType || mimeFromUrl(iconUrl) };
+
+    // Sniffed type wins over the declared one: it is both more reliable and
+    // more accurate for the browser we later serve these bytes to. The
+    // declared type is still honoured for formats we don't sniff (avif, bmp).
+    const sniffed = sniffImageMime(buffer);
+    if (sniffed) return { bytes: buffer, mime: sniffed };
+
+    const declared = res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (declared?.startsWith("image/")) return { bytes: buffer, mime: declared };
+
+    return null; // not an image - don't cache HTML as a logo
   } catch {
     return null;
   }
@@ -296,23 +395,59 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`.toUpperCase();
 }
 
+// sharp has no .ico decoder, and a meaningful minority of sites still ship
+// only one (bloomberg.com, craigslist.org). decode-ico turns the container
+// into either an embedded PNG file or raw RGBA, both of which sharp accepts,
+// so those sites get their real color instead of falling through to a hash.
+function decodeIconToSharp(bytes: Buffer): Sharp {
+  if (bytes.subarray(0, 4).toString("hex") !== ICO_MAGIC) return sharp(bytes);
+
+  const frames = decodeIco(bytes);
+  if (frames.length === 0) throw new Error("ico contained no frames");
+  const largest = [...frames].sort((a, b) => b.width * b.height - a.width * a.height)[0];
+
+  // A png frame's `data` is the encoded file; a bmp frame's is raw RGBA.
+  return largest.type === "png"
+    ? sharp(Buffer.from(largest.data))
+    : sharp(Buffer.from(largest.data), {
+        raw: { width: largest.width, height: largest.height, channels: 4 },
+      });
+}
+
 // Most favicons are small, mostly-transparent PNGs with one or two brand
 // colors and a lot of white/gray padding. A naive average or an unweighted
 // histogram both land on that padding instead of the actual mark, so this
 // discards transparent/near-white/near-black pixels, buckets survivors by
 // coarse color, and weights each bucket by how saturated it is - a small
 // saturated logo mark outweighs a large gray or white field.
-async function dominantColor(bytes: Buffer): Promise<string | null> {
+interface IconPixels {
+  data: Buffer;
+  channels: number;
+}
+
+// Decoded once per profile: the color sampling below and the logo-visibility
+// check both read these pixels, and decoding twice would be pure waste.
+async function iconPixels(bytes: Buffer): Promise<IconPixels | null> {
   try {
-    const { data, info } = await sharp(bytes)
+    const { data, info } = await decodeIconToSharp(bytes)
       .resize(32, 32, { fit: "inside" })
       .ensureAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true });
+    return { data, channels: info.channels };
+  } catch {
+    // Undecodable or malformed image bytes - callers fall through to the next
+    // rung of the color ladder rather than failing the whole card.
+    return null;
+  }
+}
 
+function dominantColor(px: IconPixels): string | null {
+  {
+    const { data } = px;
     const buckets = new Map<string, { r: number; g: number; b: number; weight: number }>();
 
-    for (let i = 0; i + 3 < data.length; i += info.channels) {
+    for (let i = 0; i + 3 < data.length; i += px.channels) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
@@ -339,19 +474,16 @@ async function dominantColor(bytes: Buffer): Promise<string | null> {
       // Everything was filtered out - a purely black/white/transparent logo
       // (X, Medium, the NYT "T"). That's real signal, not a failure: fall
       // back to which extreme the logo actually sits at.
-      return monochromeFallback(data, info.channels);
+      return monochromeFallback(px);
     }
 
     const winner = [...buckets.values()].sort((a, b) => b.weight - a.weight)[0];
     return rgbToHex(Math.round(winner.r / winner.weight), Math.round(winner.g / winner.weight), Math.round(winner.b / winner.weight));
-  } catch {
-    // sharp can't decode this format (.ico most commonly) - fall through to
-    // the next rung of the color ladder rather than failing the whole card.
-    return null;
   }
 }
 
-function monochromeFallback(data: Buffer, channels: number): string | null {
+function monochromeFallback(px: IconPixels): string | null {
+  const { data, channels } = px;
   let sum = 0;
   let count = 0;
   for (let i = 0; i + 3 < data.length; i += channels) {
@@ -382,12 +514,87 @@ function normalizeColor(value: string | null | undefined): string | null {
   return trimmed.toUpperCase();
 }
 
-function textColorFor(hexColor: string): string {
+function hexToRgb(hexColor: string): [number, number, number] {
   const hex = hexColor.replace("#", "");
-  const [r, g, b] = [hex.slice(0, 2), hex.slice(2, 4), hex.slice(4, 6)].map((c) => parseInt(c, 16) / 255);
-  const linearize = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
-  const luminance = 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
-  return luminance > 0.5 ? "#000000" : "#ffffff";
+  return [parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16)];
+}
+
+function linearize(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function relativeLuminance(r: number, g: number, b: number): number {
+  return 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+}
+
+// WCAG contrast between two relative luminances.
+function contrastRatio(a: number, b: number): number {
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
+function textColorFor(hexColor: string): string {
+  return relativeLuminance(...hexToRgb(hexColor)) > 0.5 ? "#000000" : "#ffffff";
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const [rn, gn, bn] = [r / 255, g / 255, b / 255];
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const lightness = (max + min) / 2;
+  if (max === min) return [0, 0, lightness * 100];
+
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  const hue =
+    max === rn ? (gn - bn) / delta + (gn < bn ? 6 : 0) : max === gn ? (bn - rn) / delta + 2 : (rn - gn) / delta + 4;
+  return [hue * 60, saturation * 100, lightness * 100];
+}
+
+// --- Keeping the logo legible against its own bar ---
+
+// A logo reads if some meaningful share of its pixels stand out from the bar.
+// Averaging the whole logo would hide the common case of a bright mark sitting
+// on a dark field - X's icon averages near-black yet its white mark is plainly
+// visible on a black bar.
+const LOGO_CONTRAST_MIN_RATIO = 2.5;
+const LOGO_VISIBLE_MIN_SHARE = 0.15;
+
+function logoVisibility(px: IconPixels, barHex: string): number {
+  const barLuminance = relativeLuminance(...hexToRgb(barHex));
+  let opaque = 0;
+  let distinct = 0;
+
+  for (let i = 0; i + 3 < px.data.length; i += px.channels) {
+    if (px.data[i + 3] < 128) continue;
+    opaque++;
+    const luminance = relativeLuminance(px.data[i], px.data[i + 1], px.data[i + 2]);
+    if (contrastRatio(luminance, barLuminance) >= LOGO_CONTRAST_MIN_RATIO) distinct++;
+  }
+
+  return opaque === 0 ? 1 : distinct / opaque;
+}
+
+// When the bar color was sampled from the logo, the two are the same color by
+// construction and the mark disappears into the header (pinterest.com is the
+// clean example - a red "P" on a red bar). Nudge the bar's lightness away from
+// the logo until the mark reads again, trying both directions and keeping
+// whichever needed the smaller move, so the brand hue survives.
+function shiftBarAwayFromLogo(barHex: string, px: IconPixels): string {
+  if (logoVisibility(px, barHex) >= LOGO_VISIBLE_MIN_SHARE) return barHex;
+
+  const [hue, saturation, lightness] = rgbToHsl(...hexToRgb(barHex));
+  for (let delta = 4; delta <= 56; delta += 4) {
+    // Darker first, so a tie goes to the deeper shade - a darkened brand color
+    // reads as itself far longer than a lightened one washes out to pastel.
+    for (const candidateLightness of [lightness - delta, lightness + delta]) {
+      if (candidateLightness < 8 || candidateLightness > 92) continue;
+      const candidate = hslToHex(hue, saturation, candidateLightness);
+      if (logoVisibility(px, candidate) >= LOGO_VISIBLE_MIN_SHARE) return candidate;
+    }
+  }
+
+  return barHex; // nothing helped - keep the brand color over a washed-out one
 }
 
 // A hostname that resolves nowhere else in the ladder still gets a stable,
