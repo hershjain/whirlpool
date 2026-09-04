@@ -14,6 +14,9 @@ export interface ExtractResult {
   // og:site_name, e.g. "The New York Times" - falls back to the source
   // profile's name, then the bare hostname, when null.
   siteName: string | null;
+  // og:image, kept as a URL rather than bytes - hero images run 100KB-2MB
+  // and don't belong in SQLite the way a favicon does.
+  imageUrl: string | null;
 }
 
 const EMPTY_RESULT: ExtractResult = {
@@ -22,6 +25,7 @@ const EMPTY_RESULT: ExtractResult = {
   contentFidelity: "failed",
   author: null,
   siteName: null,
+  imageUrl: null,
 };
 
 const MIN_FULL_TEXT_LENGTH = 200;
@@ -57,6 +61,7 @@ async function extractViaTwitterOEmbed(url: string): Promise<ExtractResult> {
       contentFidelity: "metadata_only",
       author: handleFromAuthorUrl(data.author_url),
       siteName: "X",
+      imageUrl: null, // oEmbed returns no image for a tweet
     };
   } catch {
     return EMPTY_RESULT;
@@ -75,14 +80,30 @@ function cleanWhitespace(value: string | null | undefined): string | null {
   return cleaned || null;
 }
 
-function extractHeadMetadata(doc: Document, readabilityByline: string | null) {
+// og:image content is a bare string, and JSDOM only resolves relative URLs for
+// real href/src attributes - so a "/og/cover.png" needs resolving by hand.
+function absoluteUrl(href: string | null | undefined, baseUrl: string): string | null {
+  if (!href) return null;
+  try {
+    return new URL(href, baseUrl).toString();
+  } catch {
+    return null;
+  }
+}
+
+function extractHeadMetadata(doc: Document, baseUrl: string, readabilityByline: string | null) {
   const author = cleanWhitespace(
     readabilityByline ||
       doc.querySelector('meta[name="author"]')?.getAttribute("content") ||
       doc.querySelector('meta[property="article:author"]')?.getAttribute("content"),
   );
   const siteName = cleanWhitespace(doc.querySelector('meta[property="og:site_name"]')?.getAttribute("content"));
-  return { author, siteName };
+  const imageUrl = absoluteUrl(
+    doc.querySelector('meta[property="og:image"]')?.getAttribute("content") ??
+      doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content"),
+    baseUrl,
+  );
+  return { author, siteName, imageUrl };
 }
 
 function extractOpenGraphFallback(doc: Document): Pick<ExtractResult, "title" | "extractedText" | "contentFidelity"> {
@@ -125,7 +146,7 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
     // afterward regardless of which branch below wins.
     const article = new Readability(doc.cloneNode(true) as Document).parse();
     const articleText = article?.textContent?.trim();
-    const { author, siteName } = extractHeadMetadata(doc, article?.byline ?? null);
+    const { author, siteName, imageUrl } = extractHeadMetadata(doc, rawUrl, article?.byline ?? null);
 
     if (articleText && articleText.length >= MIN_FULL_TEXT_LENGTH) {
       return {
@@ -134,10 +155,11 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
         contentFidelity: "full_text",
         author,
         siteName,
+        imageUrl,
       };
     }
 
-    return { ...extractOpenGraphFallback(doc), author, siteName };
+    return { ...extractOpenGraphFallback(doc), author, siteName, imageUrl };
   } catch {
     return EMPTY_RESULT;
   }

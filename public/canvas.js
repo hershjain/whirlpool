@@ -64,7 +64,7 @@ viewport.addEventListener(
 const GRID_COLS = 4;
 const CARD_W = 240; // keep in sync with `width` on .card in style.css
 const CARD_GAP = 32;
-const CARD_ROW_HEIGHT = 300; // tall enough for a fully-clamped card + breathing room
+const CARD_ROW_HEIGHT = 440; // tall enough for a fully-clamped card with a hero image + breathing room
 
 async function loadItems() {
   const [items, sources] = await Promise.all([
@@ -125,6 +125,16 @@ function renderCard(item, source) {
       <span class="card-source-name">${escapeHtml(headerName)}</span>
       ${logo}
     </div>
+  `;
+
+  if (item.imageUrl) {
+    // Sits flush between the header bar and the body so it reads as part of
+    // the card rather than an inset thumbnail. Some hosts block hotlinking,
+    // so drop the image rather than leave a broken-image box behind.
+    html += `<img class="card-hero" src="${escapeHtml(item.imageUrl)}" alt="" onerror="this.remove()" />`;
+  }
+
+  html += `
     <div class="card-body">
       <div class="card-title">${escapeHtml(item.label)}</div>
   `;

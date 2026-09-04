@@ -71,6 +71,7 @@ async function handleSaveLink(
       title: extraction.title,
       author: extraction.author,
       siteName: extraction.siteName,
+      imageUrl: extraction.imageUrl,
       rawText,
       extractedText: extraction.extractedText,
       contentFidelity: extraction.contentFidelity,

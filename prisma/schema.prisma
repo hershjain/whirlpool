@@ -16,6 +16,9 @@ model Item {
   title           String?
   author          String? // byline / handle, e.g. "@paulg" or "Jane Smith"
   siteName        String? // og:site_name, e.g. "The New York Times"
+  // Hero image for this specific page (og:image). A URL, not bytes - these
+  // run 100KB-2MB, unlike the favicon cached on SourceProfile.
+  imageUrl        String?
   rawText         String // as received in the SMS body
   extractedText   String? // best-effort extracted article/caption text
   contentFidelity String // "full_text" | "metadata_only" | "failed"

@@ -11,6 +11,7 @@ export interface ItemView {
   label: string;
   author: string | null;
   siteName: string | null;
+  imageUrl: string | null;
   // Normalized ("www."-stripped) hostname, joined client-side against
   // GET /api/sources to look up that domain's card branding. Null for notes.
   sourceHostname: string | null;
@@ -41,6 +42,7 @@ async function toItemView(item: Item): Promise<ItemView> {
     label: labelFor(item),
     author: item.author,
     siteName: item.siteName,
+    imageUrl: item.imageUrl,
     sourceHostname: item.rawUrl ? normalizeHostname(item.rawUrl) : null,
     summary: run?.summary ?? null,
     tags: run ? (JSON.parse(run.tags) as string[]) : [],
