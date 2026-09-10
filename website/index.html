@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>whirlpool</title>
+  <meta name="description" content="whirlpool — curate what you consume on the internet easily." />
+
+  <!-- The design calls for Necto Mono, which is proprietary. Space Mono is the
+       closest free stand-in and is loaded here; drop in the licensed webfont
+       when it's available and update the stack in style.css. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Screen 1: the square field spans the full width; text is pinned to the
+       viewport (logo top-left, tagline left, headline centered, arrow bottom). -->
+  <section class="screen" id="hero">
+    <div class="squares" id="squares"></div>
+
+    <div class="wordmark">whirlpool.</div>
+
+    <h1 class="headline">
+      <span class="visually-hidden">consume conciously</span>
+      <span class="type" id="type" aria-hidden="true"></span>
+    </h1>
+
+    <p class="tagline">
+      <span>curate</span>
+      <span>what</span>
+      <span>you</span>
+      <span>consume</span>
+      <span>on</span>
+      <span>the</span>
+      <span>internet</span>
+      <span>easily</span>
+    </p>
+
+    <button class="arrow" id="arrow" type="button" aria-label="Go to next section">&rarr;</button>
+
+  </section>
+
+  <!-- Screen 2: blank. The arrow moves you here. -->
+  <section class="screen" id="blank" aria-hidden="true"></section>
+
+  <!-- Outside #hero on purpose: that section clips its overflow, and the
+       cursor has to survive onto screen 2. -->
+  <div class="cursor" id="cursor" aria-hidden="true"></div>
+
+  <script src="./main.js"></script>
+</body>
+</html>

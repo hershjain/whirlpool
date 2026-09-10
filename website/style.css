@@ -1,0 +1,229 @@
+:root {
+  --teal: #00c3d0;
+  --cyan: #00c0e8;
+  --ink: #000000;
+  --paper: #ffffff;
+  --mono: 'Necto Mono', 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --edge: clamp(14px, 3.2vw, 36px); /* viewport margin for the logo + tagline */
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  scroll-snap-type: y mandatory;
+}
+
+html, body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+body { overflow-x: hidden; }
+
+/* Each screen is exactly one viewport; the arrow moves you between them. */
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--paper);
+  overflow: hidden;
+  scroll-snap-align: start;
+}
+
+/* Square field — the whirlpool, scaled from the 300-wide Figma frame to span the
+   whole page. Every measurement here comes from layout() in index.html as plain
+   pixels: an earlier version did the scaling in CSS with
+   `scale(calc(100vw / 300px))`, but length-divided-by-length is CSS Values 4, and
+   browsers that don't support it drop the whole transform and leave the squares
+   sitting unscaled in the corner. Keep the arithmetic in JS. */
+.squares {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  /* top and height are set by layout() */
+}
+
+.sq {
+  position: absolute;
+  background: var(--teal);
+  /* left, top, width and height are set by layout(); transform is driven
+     per-frame by the swirl */
+}
+
+.sq--cyan { background: var(--cyan); }
+
+/* Logo — pinned to the top-left of the page. */
+.wordmark {
+  position: absolute;
+  top: var(--edge);
+  left: var(--edge);
+  z-index: 3;
+  font-size: clamp(0.85rem, 2.2vw, 1.9rem);
+  line-height: 1;
+}
+
+/* Headline — centred in the page, both axes. */
+.headline {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  margin: 0;
+  width: min(92vw, 12em);
+  text-align: center;
+  font-weight: 400;
+  font-size: min(5.2vw, 8vh);
+  line-height: 1.25;
+}
+
+/* Typewriter. Both lines' height is reserved up front so the headline never
+   shifts as characters come and go; the caret trails the last one typed. */
+.type {
+  display: block;
+  white-space: pre-wrap; /* renders the \A in TYPE_TEXT as the line break */
+  min-height: 2.5em;     /* 2 lines x 1.25 line-height */
+}
+
+.type::after {
+  content: '';
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  margin-left: 0.06em;
+  vertical-align: -0.12em;
+  background: var(--ink);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes caret-blink {
+  0%, 50%      { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* The animated text is aria-hidden, so carry the real headline for screen
+   readers here. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Tagline — one word per line, stacked directly, bottom-left of the page. */
+.tagline {
+  position: absolute;
+  left: var(--edge);
+  bottom: var(--edge);
+  z-index: 3;
+  margin: 0;
+  font-size: clamp(0.8rem, 2.1vw, 1.4rem);
+  line-height: 1.35;
+}
+
+.tagline span { display: block; }
+
+/* Arrow — a rotated → that points down, bobs, and is a real click target. */
+.arrow {
+  position: absolute;
+  right: var(--edge);
+  bottom: var(--edge);
+  z-index: 3;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: clamp(1.4rem, 3.5vw, 2.6rem);
+  line-height: 1;
+  cursor: pointer;
+  transform: rotate(90deg);
+  /* Two animations on disjoint properties — fade-in touches only opacity,
+     arrow-bob only transform — so they coexist instead of overwriting each
+     other. The bob waits until the fade is done, and takes no fill mode, so
+     the static rotate(90deg) holds until it starts. */
+  animation: fade-in .55s ease .75s both,
+             arrow-bob 1.4s ease-in-out 1.3s infinite;
+}
+
+/* Rotated 90deg, the arrow's local +X points down the screen. */
+@keyframes arrow-bob {
+  0%, 100% { transform: rotate(90deg) translateX(0); }
+  50%      { transform: rotate(90deg) translateX(6px); }
+}
+
+/* Click: dive down and fade while the page scrolls to the blank screen. */
+.arrow--dive {
+  animation: none;
+  transition: transform .55s ease-in, opacity .55s ease-in;
+  transform: rotate(90deg) translateX(40vh);
+  opacity: 0;
+}
+
+/* Custom cursor. A real cursor can't be animated — cursor: url() takes a static
+   image only — so the native one is switched off site-wide and this trails the
+   pointer instead. Fixed, and a body-level child, so #hero's overflow:hidden
+   can't clip it and it carries onto the second screen. Never a hit target. */
+.cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  display: none;
+  pointer-events: none;
+}
+
+/* Set by main.js on the first real mousemove, so a touch-only device is never
+   left without a cursor. The `*` is needed because .arrow sets cursor: pointer
+   and would otherwise win over a bare html rule. */
+.has-cursor,
+.has-cursor * { cursor: none; }
+
+.cursor__dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--ink);
+  /* size and transform are set per-frame */
+}
+
+/* Load-in reveal: each element fades up in turn — wordmark, tagline, arrow,
+   headline. `both` fill holds them at opacity 0 before their delay, so there's
+   no flash of fully-styled text on a slow load.
+
+   .arrow and .headline animate opacity ONLY: both already own a transform
+   (rotate(90deg) and translate(-50%,-50%)), which a translateY here would
+   clobber. They get their motion from the bob and the typewriter instead. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.wordmark { animation: rise-in .55s ease .15s both; }
+.tagline  { animation: rise-in .55s ease .45s both; }
+/* .arrow's fade is declared with its bob, above. */
+.headline { animation: fade-in .55s ease 1.05s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .arrow,
+  .arrow--dive { animation: none; transition: none; }
+  .type::after { animation: none; opacity: 0; }
+  .cursor { display: none !important; }
+  .wordmark,
+  .tagline,
+  .headline { animation: none; opacity: 1; }
+}
