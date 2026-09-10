@@ -13,6 +13,12 @@ import { extractFromUrl } from "./linkExtract.js";
 // Only ever fill in or improve - a re-extraction that comes back empty must
 // not wipe good data captured when the page still resolved. One of these
 // tweets has since been deleted and now 404s.
+//
+// The flip side: this can't *clear* a stale value. A row saved as
+// title="Reddit" before the Reddit branch existed gets corrected here because
+// re-extraction now returns a real title; but a JS-shell site with no branch
+// yet (bsky.app) would keep its old "Bluesky" title, since the fresh
+// extraction's title is null and null is never written.
 function fieldsToUpdate(
   extraction: Awaited<ReturnType<typeof extractFromUrl>>,
 ): Record<string, string | number> {
@@ -26,8 +32,13 @@ function fieldsToUpdate(
   if (extraction.imageUrl) updates.imageUrl = extraction.imageUrl;
   if (extraction.extractedText) {
     updates.extractedText = extraction.extractedText;
-    // Fidelity describes the text we just stored, so it only moves when the
-    // text does - never downgrade a good capture to "failed".
+  }
+  // Move fidelity forward on any non-failed re-extraction, not only one that
+  // brought text: a Reddit/Spotify capture is "metadata_only" with a title and
+  // image but no body, and leaving it marked "failed" would misdescribe a row
+  // that now previews fine. A fresh "failed" is never written back, so a good
+  // capture that has since broken keeps its old, better fidelity.
+  if (extraction.contentFidelity !== "failed") {
     updates.contentFidelity = extraction.contentFidelity;
   }
   return updates;

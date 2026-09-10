@@ -474,6 +474,11 @@ function renderCard(item, source) {
   // Still clickable - you may well want to check for yourself.
   if (item.isBroken) {
     html += `<div class="card-broken">Link unavailable</div>`;
+  } else if (!item.hasPreview) {
+    // The link resolves, but it's a client-rendered app (Reddit, Bluesky) that
+    // handed us nothing to show. Better an honest note than a bare hostname
+    // dressed up as a real card.
+    html += `<div class="card-broken">Preview unavailable</div>`;
   }
 
   const byline = item.author || item.siteName || item.sourceHostname;

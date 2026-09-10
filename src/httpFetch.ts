@@ -30,6 +30,20 @@ export const BROWSER_IMAGE_HEADERS: Record<string, string> = {
   "Sec-Fetch-Dest": "image",
 };
 
+// A handful of sites render everything client-side and serve a bare app shell
+// to a browser UA - reddit.com answers 200 with 8KB of JavaScript and not one
+// og: tag. The same URL fetched as a social crawler gets the pre-rendered
+// version, tags and all, because that's the copy they build for link previews.
+//
+// Only for hosts proven to need it, never as the default: a crawler UA is not
+// uniformly better. Reddit itself answers 403 to bingbot, and the Sec-Fetch
+// headers above are what keep apnews.com returning 200.
+export const CRAWLER_PAGE_HEADERS: Record<string, string> = {
+  "User-Agent": "Twitterbot/1.0",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 export interface FetchWithTimeoutOptions {

@@ -33,6 +33,11 @@ export interface ItemView {
   // True when the last fetch found the page gone. Surfaced on the card so a
   // dead save reads as dead rather than as an item that simply extracted badly.
   isBroken: boolean;
+  // True when extraction came back with nothing worth showing - a client-side
+  // app shell (reddit.com, bsky.app) that resolves fine but yields no title,
+  // text or image. Distinct from isBroken: the link works, we just can't
+  // preview it. The card says so instead of showing a bare hostname.
+  hasPreview: boolean;
   createdAt: Date;
   canvasX: number | null;
   canvasY: number | null;
@@ -73,7 +78,10 @@ function isLongForm(item: Item): boolean {
 
 function labelFor(item: Item): string {
   if (item.title) return item.title;
-  if (item.rawUrl) return item.rawUrl;
+  // A titleless link means extraction found nothing (a JS app shell). The bare
+  // hostname reads far better on the card than a 90-char share URL full of
+  // tracking params.
+  if (item.rawUrl) return normalizeHostname(item.rawUrl) ?? item.rawUrl;
   return item.rawText.length > 60 ? `${item.rawText.slice(0, 57)}...` : item.rawText;
 }
 
@@ -103,6 +111,7 @@ async function toItemView(
     category: run?.category ?? null,
     contentFidelity: item.contentFidelity,
     isBroken: item.linkStatus === 404 || item.linkStatus === 410,
+    hasPreview: Boolean(item.title || item.imageUrl || item.extractedText),
     createdAt: item.createdAt,
     canvasX: item.canvasX,
     canvasY: item.canvasY,
