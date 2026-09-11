@@ -52,6 +52,11 @@ model Folder {
   name      String
   createdAt DateTime @default(now())
 
+  // Where this folder's square sits on the board while it is open. Null until
+  // the first open, which auto-places it clear of the cards already there.
+  canvasX Float?
+  canvasY Float?
+
   items Item[]
 
   @@unique([phone, name])

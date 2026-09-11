@@ -1,6 +1,14 @@
 import { Router } from "express";
 import { config } from "./config.js";
-import { listAllItems, updateItemPosition, listFolders, createFolder, setItemFolder } from "./repo.js";
+import {
+  listAllItems,
+  updateItemPosition,
+  deleteItem,
+  listFolders,
+  createFolder,
+  setItemFolder,
+  updateFolderPosition,
+} from "./repo.js";
 import { prisma } from "./db.js";
 
 export const canvasRouter: Router = Router();
@@ -58,6 +66,15 @@ canvasRouter.patch("/items/:id/position", async (req, res) => {
   res.status(204).end();
 });
 
+canvasRouter.delete("/items/:id", async (req, res) => {
+  const deleted = await deleteItem(config.ownerPhoneNumber, req.params.id);
+  if (!deleted) {
+    res.status(404).json({ error: "Item not found" });
+    return;
+  }
+  res.status(204).end();
+});
+
 // --- Folders: user-made collections ---
 
 canvasRouter.get("/folders", async (_req, res) => {
@@ -95,6 +112,22 @@ canvasRouter.patch("/items/:id/folder", async (req, res) => {
   const updated = await setItemFolder(config.ownerPhoneNumber, id, folderId);
   if (!updated) {
     res.status(404).json({ error: "Item or folder not found" });
+    return;
+  }
+  res.status(204).end();
+});
+
+canvasRouter.patch("/folders/:id/position", async (req, res) => {
+  const { x, y } = req.body as { x?: unknown; y?: unknown };
+
+  if (typeof x !== "number" || typeof y !== "number" || !Number.isFinite(x) || !Number.isFinite(y)) {
+    res.status(400).json({ error: "x and y must be finite numbers" });
+    return;
+  }
+
+  const updated = await updateFolderPosition(config.ownerPhoneNumber, req.params.id, x, y);
+  if (!updated) {
+    res.status(404).json({ error: "Folder not found" });
     return;
   }
   res.status(204).end();

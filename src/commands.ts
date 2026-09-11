@@ -1,5 +1,5 @@
 import { prisma } from "./db.js";
-import { extractFromUrl } from "./linkExtract.js";
+import { extractFromUrl, isMusicUrl } from "./linkExtract.js";
 import { resolveSourceProfileForCapture } from "./sourceProfile.js";
 import { enrichLink, enrichNote, enrichmentInput, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
@@ -90,6 +90,14 @@ async function handleSaveLink(
     await resolveSourceProfileForCapture(url);
   } catch (error) {
     console.error(`Failed to resolve source profile for ${url}`, error);
+  }
+
+  // A song is its name and its artist, both of which the extraction already
+  // has. There is nothing for a model to summarize, and asking it to try gave
+  // a Drake track the tags "virginia-beach, travel, coastal" - so music skips
+  // enrichment entirely rather than paying for a wrong answer.
+  if (isMusicUrl(url)) {
+    return null;
   }
 
   // A save with no body text can still be worth tagging when it has a real

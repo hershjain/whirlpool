@@ -1,6 +1,7 @@
 import { prisma } from "./db.js";
 import type { Item, EnrichmentRun } from "@prisma/client";
 import { normalizeHostname } from "./sourceProfile.js";
+import { isMusicUrl } from "./linkExtract.js";
 
 export interface ItemView {
   id: string;
@@ -29,6 +30,11 @@ export interface ItemView {
   isLongForm: boolean;
   tags: string[];
   category: string | null;
+  // A track on a streaming service. The card leads with the song name and puts
+  // the artist under it, and carries no summary and no tags: asking a model to
+  // describe a song it can only see the title of produced a Drake track filed
+  // as a travel reference.
+  isMusic: boolean;
   contentFidelity: string;
   // True when the last fetch found the page gone. Surfaced on the card so a
   // dead save reads as dead rather than as an item that simply extracted badly.
@@ -93,6 +99,7 @@ async function toItemView(
     orderBy: { createdAt: "desc" },
   });
   const label = labelFor(item);
+  const isMusic = item.rawUrl !== null && isMusicUrl(item.rawUrl);
 
   return {
     id: item.id,
@@ -104,11 +111,18 @@ async function toItemView(
     siteName: item.siteName,
     imageUrl: item.imageUrl,
     sourceHostname: item.rawUrl ? normalizeHostname(item.rawUrl) : null,
-    summary: run?.summary ?? null,
+    // Suppressed here rather than only at capture, so the rows enriched before
+    // music was recognised stop showing their invented summary and tags
+    // without having to be rewritten.
+    summary: isMusic ? null : (run?.summary ?? null),
     excerpt: excerptFor(item, label),
     isLongForm: isLongForm(item),
-    tags: run ? (JSON.parse(run.tags) as string[]) : [],
-    category: run?.category ?? null,
+    tags: isMusic || !run ? [] : (JSON.parse(run.tags) as string[]),
+    // Dropped for the same reason as the tags, and so the rows enriched before
+    // music was recognised behave like the ones captured since, which skip
+    // enrichment and have no category at all.
+    category: isMusic ? null : (run?.category ?? null),
+    isMusic,
     contentFidelity: item.contentFidelity,
     isBroken: item.linkStatus === 404 || item.linkStatus === 410,
     hasPreview: Boolean(item.title || item.imageUrl || item.extractedText),
@@ -209,12 +223,30 @@ export async function updateItemPosition(
   return result.count > 0;
 }
 
+// Permanent, and the only destructive operation the canvas has. EnrichmentRun
+// holds a required foreign key to Item with no cascade, so its rows go first -
+// in one transaction, so a half-deleted item can never be left behind.
+export async function deleteItem(phone: string, itemId: string): Promise<boolean> {
+  const item = await prisma.item.findFirst({ where: { id: itemId, phone }, select: { id: true } });
+  if (!item) return false;
+
+  await prisma.$transaction([
+    prisma.enrichmentRun.deleteMany({ where: { itemId } }),
+    prisma.item.delete({ where: { id: itemId } }),
+  ]);
+  return true;
+}
+
 // --- Folders: user-made collections, distinct from the model's tags/category ---
 
 export interface FolderView {
   id: string;
   name: string;
   itemCount: number;
+  // Where the folder's square sits on the board. Null until the first time it
+  // is opened, which places it clear of the cards already on the canvas.
+  canvasX: number | null;
+  canvasY: number | null;
 }
 
 export async function listFolders(phone: string): Promise<FolderView[]> {
@@ -223,7 +255,13 @@ export async function listFolders(phone: string): Promise<FolderView[]> {
     orderBy: { createdAt: "asc" },
     include: { _count: { select: { items: true } } },
   });
-  return folders.map((folder) => ({ id: folder.id, name: folder.name, itemCount: folder._count.items }));
+  return folders.map((folder) => ({
+    id: folder.id,
+    name: folder.name,
+    itemCount: folder._count.items,
+    canvasX: folder.canvasX,
+    canvasY: folder.canvasY,
+  }));
 }
 
 // Files (or, with folderId null, unfiles) an item into a folder. Returns
@@ -256,5 +294,26 @@ export async function createFolder(phone: string, name: string): Promise<FolderV
     create: { phone, name: trimmed },
     include: { _count: { select: { items: true } } },
   });
-  return { id: folder.id, name: folder.name, itemCount: folder._count.items };
+  return {
+    id: folder.id,
+    name: folder.name,
+    itemCount: folder._count.items,
+    canvasX: folder.canvasX,
+    canvasY: folder.canvasY,
+  };
+}
+
+// Same shape and scoping as updateItemPosition - a folder's square is placed by
+// hand on the board, so where it sits belongs to the owner like a card does.
+export async function updateFolderPosition(
+  phone: string,
+  folderId: string,
+  x: number,
+  y: number,
+): Promise<boolean> {
+  const result = await prisma.folder.updateMany({
+    where: { id: folderId, phone },
+    data: { canvasX: x, canvasY: y },
+  });
+  return result.count > 0;
 }

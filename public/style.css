@@ -25,8 +25,11 @@
   --folder-text: #17663a;
   --folder-soft: rgba(31, 139, 76, 0.12);
   --folder-soft-hover: rgba(31, 139, 76, 0.2);
-  --folder-zone-fill: rgba(31, 139, 76, 0.15);
-  --folder-zone-edge: rgba(31, 139, 76, 0.35);
+  /* The square on the board reads as a surface things sit on, so it carries
+     more weight than the chips do - the tile's own corner badge keeps the
+     lighter --folder-soft above. */
+  --folder-zone-fill: rgba(31, 139, 76, 0.3);
+  --folder-zone-edge: rgba(31, 139, 76, 0.45);
 }
 
 * { box-sizing: border-box; }
@@ -256,10 +259,11 @@ html, body {
   letter-spacing: -0.01em;
 }
 
+/* Logo, then the site's name, then the delete control - the order is
+   positional now, so there's no space-between to fight the name for room. */
 .card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   padding: 8px 12px;
   background: var(--source-color, var(--header-neutral));
@@ -267,6 +271,10 @@ html, body {
 }
 
 .card-source-name {
+  /* Takes the slack between the logo and the X, and gives it back by
+     ellipsising rather than by pushing the X off the end of the bar. */
+  flex: 1;
+  min-width: 0;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -275,47 +283,116 @@ html, body {
   white-space: nowrap;
 }
 
-/* Groups the folder control and the logo so they sit adjacent on the right
-   (folder immediately left of the logo) while .card-header's space-between
-   still pushes the source name to the left. */
-.card-header-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* Inherits the header's per-source text colour, so it stays legible on a dark
+   brand bar and a light one alike without a colour of its own. Muted until
+   hovered - it's destructive, and shouldn't be the loudest thing on the tile. */
+.card-delete {
   flex-shrink: 0;
+  margin-left: auto; /* stays hard right even on a card with no logo */
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  opacity: 0.55;
+  cursor: pointer;
 }
 
+.card-delete:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Takes over the bar in place of the name and the X while a tile is mid-
+   decision - same row, same colours, no dialog. */
+.card-delete-confirm {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.card--confirming .card-source-name,
+.card--confirming .card-delete {
+  display: none;
+}
+
+.card--confirming .card-delete-confirm {
+  display: flex;
+}
+
+.card-delete-ask {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.card-delete-confirm button {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  line-height: 1;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.card-delete-confirm button:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* Bottom-right corner of the tile, not the header bar - filing something is a
+   thing you do to the whole card, and the header now belongs to the source and
+   the delete control. .card is positioned, so this anchors to the tile. */
 .card-folder {
-  flex-shrink: 0;
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
   font: inherit;
   font-size: 11px; /* matches .card-tag */
   font-weight: 600;
   padding: 3px 8px; /* matches .card-tag */
-  max-width: 90px;
+  max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--folder-text);
-  /* The header behind this is branded per source, so a bare translucent green
-     would disappear on a dark one and take the green text with it. Compositing
-     the tint over a near-white base keeps the chip identical on every card. */
-  background: linear-gradient(var(--folder-soft), var(--folder-soft)), rgba(255, 255, 255, 0.94);
+  /* Plainly translucent now that it sits on the card body rather than a
+     per-source brand bar - the backdrop is known, so the tint no longer has to
+     be composited over an opaque base to stay legible. */
+  background: var(--folder-soft);
   border: none;
-  border-radius: 6px; /* rectangle, against the tag pill's 999px */
+  border-radius: 7px; /* rectangle, against the tag pill's 999px */
   cursor: pointer;
 }
 
-/* An unfiled tile gets a square "+" instead of a word - a touch smaller than
-   the 20px logo beside it, and centred by flex, which padding never managed. */
+.card-folder:hover {
+  background: var(--folder-soft-hover);
+}
+
+/* An unfiled tile gets a "+" in a rounded square instead of a word. Grid
+   centring puts the glyph on the box's centre in both axes, which inline-flex
+   with a 14px glyph never quite managed. */
 .card-folder--empty {
-  width: 18px;
-  height: 18px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   max-width: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
   line-height: 1;
 }
 
@@ -351,7 +428,9 @@ html, body {
 }
 
 .card-body {
-  padding: 14px 16px;
+  /* Extra room at the foot so the corner folder control never lands on the
+     last line of text or the tag row. */
+  padding: 14px 16px 36px;
 }
 
 .card-title {
@@ -568,7 +647,7 @@ html, body {
   background: var(--folder-soft-hover);
 }
 
-/* --- Folder view: the translucent cluster square and dimmed background --- */
+/* --- A folder's square, sitting on the board like anything else on it --- */
 .folder-zone {
   position: absolute;
   z-index: 1; /* above dimmed cards, below the members inside it */
@@ -582,10 +661,11 @@ html, body {
 
 /* Centred on the zone's top edge, in the same chip language as everything else
    green - over the canvas ground rather than a card, so the tint composites
-   against --bg. */
+   against --bg. Also the square's drag handle: the square itself takes no
+   pointer events, so that a card underneath it stays grabbable. */
 .folder-zone-label {
   position: absolute;
-  top: -13px;
+  top: -15px; /* keeps the taller chip straddling the square's top edge */
   left: 50%;
   transform: translateX(-50%);
   white-space: nowrap;
@@ -594,12 +674,21 @@ html, body {
   color: var(--folder-text);
   background: linear-gradient(var(--folder-soft), var(--folder-soft)), var(--bg);
   border: 1px solid var(--folder-zone-edge);
-  padding: 3px 9px;
+  padding: 5px 12px;
   border-radius: 6px;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
 }
 
-.card--dimmed {
-  opacity: 0.35;
+.folder-zone.dragging .folder-zone-label {
+  cursor: grabbing;
+}
+
+/* A re-flow should ease; a square being dragged should not - its members would
+   trail a third of a second behind the frame carrying them. */
+body.dragging-zone .card {
+  transition: none;
 }
 
 .card--foldered {

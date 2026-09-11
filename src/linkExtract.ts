@@ -54,6 +54,32 @@ function isSpotifyUrl(url: URL): boolean {
   return url.hostname === "open.spotify.com";
 }
 
+// Every streaming service renders its player client-side, so what these have
+// in common isn't a shape we can parse - it's that a music link is a song, and
+// a song is a name and an artist rather than something to summarize or tag.
+// Matched on hostname, which also lets the reader and the capture path ask the
+// same question of a row that was saved long before this existed.
+const MUSIC_HOSTNAMES = [
+  "open.spotify.com",
+  "music.apple.com",
+  "music.youtube.com",
+  "soundcloud.com",
+  "bandcamp.com",
+  "tidal.com",
+  "listen.tidal.com",
+  "music.amazon.com",
+  "deezer.com",
+];
+
+export function isMusicUrl(rawUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rawUrl);
+    return MUSIC_HOSTNAMES.some((host) => hostname === host || hostname.endsWith(`.${host}`));
+  } catch {
+    return false;
+  }
+}
+
 // Instagram writes the caption into og:title behind the account name -
 //   Kokka Fabrics for Creators on Instagram: "Pathway by Bookhou..."
 // - and again into og:description behind a likes/comments/date preamble. Left
@@ -279,6 +305,90 @@ async function extractViaSpotifyOEmbed(url: string): Promise<ExtractResult> {
   }
 }
 
+// Which segment of a music page's preview text is the artist, per service.
+// Verified against each one's live crawler response:
+//   Spotify       og:description "Drake \u00b7 For All The Dogs \u00b7 Song \u00b7 2023"
+//   Apple Music   og:title       "CHIHIRO by Billie Eilish on Apple Music"
+//   YouTube Music og:description "Rick Astley"
+const APPLE_MUSIC_TITLE = /^(.*) by (.*) on Apple Music$/;
+
+// Spotify puts the release type where an artist would be on anything that
+// isn't credited to one - a playlist reads "Playlist \u00b7 120 songs". Printing
+// "Playlist" under the name as though it were the artist is worse than
+// printing nothing.
+const NOT_AN_ARTIST = new Set(["song", "album", "playlist", "podcast", "episode", "artist", "single"]);
+
+function artistFromDescription(description: string | null): string | null {
+  const first = cleanWhitespace(description?.split("\u00b7")[0] ?? null);
+  if (!first || NOT_AN_ARTIST.has(first.toLowerCase())) return null;
+  // A description that runs on, or ends in a full stop, is a blurb rather than
+  // a name - SoundCloud and Bandcamp write prose there.
+  if (first.length > 80 || first.endsWith(".")) return null;
+  return first;
+}
+
+function splitMusicMetadata(
+  hostname: string,
+  ogTitle: string | null,
+  ogDescription: string | null,
+): { title: string | null; artist: string | null } {
+  // Cleaned before matching, not after: Apple wraps og:title across lines, and
+  // a "." in the pattern won't cross a newline, so the raw string never
+  // matched even though it reads as one line.
+  const cleanTitle = cleanWhitespace(ogTitle);
+
+  if (hostname === "music.apple.com") {
+    const match = cleanTitle?.match(APPLE_MUSIC_TITLE);
+    // Apple's description is "Song \u00b7 2024 \u00b7 Duration 5:03" - no artist in it at
+    // all - so a title that doesn't match leaves the artist blank rather than
+    // falling through to a segment that would read "Song".
+    return match
+      ? { title: cleanWhitespace(match[1]), artist: cleanWhitespace(match[2]) }
+      : { title: cleanTitle, artist: null };
+  }
+  return { title: cleanTitle, artist: artistFromDescription(ogDescription) };
+}
+
+// A music link is a song: a name and whoever made it. This reads both off the
+// preview the service builds for crawlers - the same Twitterbot trick the
+// Reddit branch uses, since every one of these renders its player client-side
+// and serves a browser nothing worth parsing. Never returns body text: there
+// is no article here to summarize, and a card that tried would be inventing.
+async function extractMusicMetadata(rawUrl: string, url: URL): Promise<ExtractResult> {
+  // Spotify's oEmbed endpoint is public and returns the track name and a
+  // hotlinkable cover, which is worth falling back to - it just has no artist.
+  const fallback = (httpStatus: number | null): Promise<ExtractResult> | ExtractResult =>
+    isSpotifyUrl(url) ? extractViaSpotifyOEmbed(rawUrl) : { ...EMPTY_RESULT, httpStatus };
+
+  try {
+    const res = await fetchWithTimeout(rawUrl, { headers: CRAWLER_PAGE_HEADERS });
+    if (!res.ok) return fallback(res.status);
+
+    const doc = new JSDOM(await res.text(), { url: rawUrl }).window.document;
+    const meta = (property: string): string | null =>
+      doc.querySelector(`meta[property="${property}"]`)?.getAttribute("content") ?? null;
+
+    const { title, artist } = splitMusicMetadata(url.hostname, meta("og:title"), meta("og:description"));
+    const imageUrl = absoluteUrl(
+      meta("og:image") ?? doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content"),
+      rawUrl,
+    );
+    if (!title && !imageUrl) return fallback(res.status);
+
+    return {
+      title,
+      extractedText: null,
+      contentFidelity: "metadata_only",
+      author: artist,
+      siteName: cleanWhitespace(meta("og:site_name")),
+      imageUrl,
+      httpStatus: res.status,
+    };
+  } catch {
+    return fallback(null);
+  }
+}
+
 // Reads whatever author/site metadata the page's <head> has, independent of
 // which branch below ends up supplying the body text - a Readability success
 // still needs its byline read from the *original* document, since Readability
@@ -364,8 +474,8 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
     return extractViaRedditOG(rawUrl);
   }
 
-  if (isSpotifyUrl(url)) {
-    return extractViaSpotifyOEmbed(rawUrl);
+  if (isMusicUrl(rawUrl)) {
+    return extractMusicMetadata(rawUrl, url);
   }
 
   try {
