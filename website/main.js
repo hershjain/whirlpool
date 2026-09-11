@@ -1,5 +1,8 @@
 /* whirlpool — hero behaviour.
  *
+ * Hero only. Anything shared with the other pages lives in site.js, which
+ * loads first and hands the pointer over via WP_CURSOR.
+ *
  * Deliberately conservative: var/function, requestAnimationFrame, and
  * transform: translate/rotate/scale only. An earlier build scaled the tiles in
  * CSS with `calc(<length> / <length>)`, which is CSS Values 4 — browsers
@@ -27,7 +30,6 @@ var REVEAL_HEADLINE = 1050; // matches .headline's animation-delay in style.css
 
 var hero = document.getElementById('hero');
 var field = document.getElementById('squares');
-var cursorEl = document.getElementById('cursor');
 
 var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -42,8 +44,6 @@ var nodes = SQUARES.map(function (s) {
 
 var rects = [];     // each tile's centre, at rest, in hero coordinates
 var tileSize = SQ;  // nominal tile size, used for effect strengths
-var dotBase = 8;    // trail dot size; viewport-derived, not tile-derived,
-                    // because the cursor also runs over the blank screen
 var heroTop = 0;    // hero's viewport offset, cached out of the hot path
 
 function syncHeroTop() {
@@ -65,7 +65,6 @@ function layout() {
   field.style.height = artH + 'px';
 
   tileSize = Math.ceil(SQ * k);
-  dotBase = Math.max(7, Math.round(vw * 0.006));
 
   // Draw every tile larger than its nominal size and shift it back by the same
   // amount, so flush neighbours overlap by 2*pad instead of merely touching.
@@ -131,39 +130,18 @@ if (reduced) {
 
 /* ------------------------------------------------------------------ swirl */
 
-var pointer = {
-  vx: -9999, vy: -9999,  // viewport coordinates, for the cursor
-  active: false
-};
-
-var overArrow = false;
-var arrowEase = 0;
+// Owned by site.js — the cursor and the swirl track the same pointer.
+var pointer = window.WP_CURSOR.pointer;
 
 // Eased state per tile, so the swirl gets a smooth approach and return.
 var state = SQUARES.map(function () {
   return { dx: 0, dy: 0, rot: 0 };
 });
 
-document.addEventListener('mousemove', function (e) {
-  pointer.vx = e.clientX;
-  pointer.vy = e.clientY;
-
-  if (!pointer.active) {
-    pointer.active = true;
-    // Only hide the native cursor once a real mouse has moved, so a touch-only
-    // device never ends up in a cursorless state.
-    document.documentElement.className += ' has-cursor';
-  }
-});
-
-document.addEventListener('mouseleave', function () { pointer.active = false; });
-document.addEventListener('mouseenter', function () { pointer.active = true; });
-
 var EASE = 0.15;
 var SWIRL_ANG = 0.6;  // radians at the very centre of the vortex
 
-function frame(now) {
-  var t = now / 1000;
+function frame() {
   var R = tileSize * 2.2;                 // radius of influence
   var live = pointer.active && !reduced;
 
@@ -205,70 +183,53 @@ function frame(now) {
       'rotate(' + st.rot.toFixed(2) + 'deg)';
   }
 
-  updateCursor();
   requestAnimationFrame(frame);
-}
-
-/* --------------------------------------------------------- trail cursor */
-
-var TRAIL = 6;
-var dots = [];
-var trailPos = [];
-
-for (var d0 = 0; d0 < TRAIL; d0++) {
-  var d = document.createElement('div');
-  d.className = 'cursor__dot';
-  cursorEl.appendChild(d);
-  dots.push(d);
-  trailPos.push({ x: -9999, y: -9999 });
-}
-
-function updateCursor() {
-  var show = pointer.active && !reduced;
-
-  cursorEl.style.display = show ? 'block' : 'none';
-  if (!show) return;
-
-  // Ease the hover cue so the dots swell rather than snap.
-  arrowEase += ((overArrow ? 1 : 0) - arrowEase) * EASE;
-  var size = dotBase * (1 + arrowEase * 0.6);
-
-  // Each dot eases toward the one ahead of it, so quick moves leave a wake.
-  for (var i = 0; i < trailPos.length; i++) {
-    var target = i === 0 ? pointer : trailPos[i - 1];
-    var tx = i === 0 ? target.vx : target.x;
-    var ty = i === 0 ? target.vy : target.y;
-
-    trailPos[i].x += (tx - trailPos[i].x) * (0.35 - i * 0.04);
-    trailPos[i].y += (ty - trailPos[i].y) * (0.35 - i * 0.04);
-
-    var s = Math.round(size * (1 - i * 0.12));
-    dots[i].style.width = s + 'px';
-    dots[i].style.height = s + 'px';
-    dots[i].style.transform =
-      'translate(' + (trailPos[i].x - s / 2).toFixed(1) + 'px,' +
-      (trailPos[i].y - s / 2).toFixed(1) + 'px)';
-  }
 }
 
 requestAnimationFrame(frame);
 
-/* ------------------------------------------------------------------- arrow */
+/* --------------------------------------------------- arrow + top-screen nav */
 
 var arrow = document.getElementById('arrow');
-var blank = document.getElementById('blank');
+var screens = document.querySelectorAll('.screen');
 
-arrow.addEventListener('mouseenter', function () { overArrow = true; });
-arrow.addEventListener('mouseleave', function () { overArrow = false; });
+// "learn more" belongs to the hero only; the logo is the part that persists.
+var learnMore = document.querySelector('.chrome__actions .btn');
+
+var NUDGE_MS = 450;  // matches arrow-nudge's duration in style.css
+
+// The first screen whose top is below where we are now. Compared with a small
+// slack so that sitting exactly on a boundary still advances.
+function nextScreen() {
+  var y = window.scrollY;
+  for (var i = 0; i < screens.length; i++) {
+    if (screens[i].offsetTop > y + 4) return screens[i];
+  }
+  return null;
+}
 
 arrow.addEventListener('click', function () {
-  arrow.classList.add('arrow--dive');
-  blank.scrollIntoView({ behavior: 'smooth' });
+  var next = nextScreen();
+  if (next) next.scrollIntoView({ behavior: 'smooth' });
+
+  arrow.classList.add('arrow--nudge');
+  setTimeout(function () {
+    arrow.classList.remove('arrow--nudge');
+  }, NUDGE_MS);
 });
 
-// Coming back to the top brings the arrow back.
-window.addEventListener('scroll', function () {
-  if (window.scrollY < window.innerHeight * 0.5) {
-    arrow.classList.remove('arrow--dive');
-  }
-}, { passive: true });
+function syncChrome() {
+  var y = window.scrollY;
+
+  // Past the hero, "learn more" goes.
+  if (y > window.innerHeight * 0.5) learnMore.classList.add('is-hidden');
+  else learnMore.classList.remove('is-hidden');
+
+  // On the last screen there is nothing to point at.
+  if (nextScreen()) arrow.classList.remove('is-hidden');
+  else arrow.classList.add('is-hidden');
+}
+
+syncChrome();
+window.addEventListener('scroll', syncChrome, { passive: true });
+window.addEventListener('resize', syncChrome);

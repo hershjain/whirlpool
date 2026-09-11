@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>log in — whirlpool</title>
+  <meta name="description" content="Log in to whirlpool." />
+
+  <!-- The design calls for Necto Mono, which is proprietary. Space Mono is the
+       closest free stand-in and is loaded here; drop in the licensed webfont
+       when it's available and update the stack in style.css. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Logo only. No chrome buttons: this is the page they point at. -->
+  <header class="chrome">
+    <a class="wordmark" href="./index.html">whirlpool.</a>
+  </header>
+
+  <!-- Deliberately blank, pending the real page. -->
+  <main class="page"></main>
+
+  <!-- The trail cursor and nothing else; main.js is hero-only and would throw here. -->
+  <script src="./site.js"></script>
+</body>
+</html>

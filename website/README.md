@@ -5,9 +5,19 @@ pages and assets in this folder as they're designed.
 
 ## Files
 
-- `index.html` — landing / hero, markup only
-- `main.js` — layout, typewriter, tile + cursor interaction
+- `index.html` — the whole landing page: hero, how it works, why, try now, as
+  four full-viewport screens you scroll through in order
+- `login.html` — the only screen that is not part of the landing page, because it
+  will hand off to the canvas webview. Deliberately blank apart from the logo.
+- `site.js` — shared chrome: currently the trail cursor. Loaded by every page.
+- `main.js` — the landing page only: hero layout, typewriter, tile swirl, and
+  the arrow / `learn more` scroll state. Loaded after `site.js`, which hands it
+  the pointer via `WP_CURSOR`.
 - `style.css` — everything visual
+- `dithered-floyd-steinberg-1788999256128.png` — the art on the why screen,
+  518x400. It renders ~340px wide on a desktop viewport, about 1.5x density, and
+  is capped at 440. If you swap the file, update the `<img>`'s `width`/`height`
+  **attributes** to match: they're what reserves the box before it decodes.
 
 ## Notes
 
@@ -25,20 +35,70 @@ pages and assets in this folder as they're designed.
   neighbours overlap rather than merely touch. Without that, per-tile motion
   tears white seams through the field.
 
+- **The content screens came from 300x200 Figma frames.** Those frames' font
+  sizes are *frame units*, not pixels — mapping them literally gives ~48px body
+  copy, since the site does not scale type at the frame ratio the way the hero
+  scales its tiles. Read the frames for hierarchy and widths (the why row is
+  183 + 89 of 300, which is why copy and art sit side by side) and express the
+  sizes with the site's `clamp()` idiom. `--copy` is the body-copy token.
+- **The user's copy is verbatim.** That includes `consume conciously` in the
+  hero, "so much shit" on the why screen, and `recieve` in step (3) of the join
+  copy. Don't tidy any of it without asking.
+- **The why art's ratio comes from the `<img>` width/height attributes**, not
+  `aspect-ratio` — attributes are the oldest, safest way to reserve intrinsic
+  ratio, which matters on this project. It's a dithered image, so it carries
+  `image-rendering: pixelated`; a smooth upscale muddies the dither.
+
 ## Interaction
 
 - **Swirl** — tiles near the pointer rotate around it and are drawn slightly
   inward, falling off with distance. `frame()` in `main.js`.
-- **Trail cursor** — site-wide. The native cursor can't be animated (`cursor:
-  url()` is static only), so it's hidden via the `has-cursor` class and six
-  trailing dots follow the pointer instead. The element is a **body-level child
-  with `position: fixed`** — inside `#hero` it would be clipped by that
-  section's `overflow: hidden` and missing from screen 2.
-- **Load-in reveal** — wordmark, tagline, arrow, then headline fade up in turn,
+- **Trail cursor** — site-wide, in `site.js`. The native cursor can't be animated
+  (`cursor: url()` is static only), so it's hidden via the `has-cursor` class and
+  six trailing dots follow the pointer instead. The element is built in JS as a
+  **body-level child with `position: fixed`** — inside `#hero` it would be
+  clipped by that section's `overflow: hidden` and missing from screen 2. It
+  swells over any `a` or `button` by delegated hover, so new links need no wiring.
+- **Buttons** — `.btn` is an unfilled rounded rectangle that fills with `--cyan`
+  on hover and drops its outline (`border-color: transparent`, not `border: 0`,
+  so the box doesn't resize). `learn more` belongs to the hero: it
+  points at `#how` and fades out once you scroll past half the first screen.
+  `login` sits at the foot of the page, on the try-now screen, since it is the
+  only link that leaves this page. The logo is the only chrome that persists
+  everywhere.
+- **Arrow** — fixed, not pinned inside `#hero`, so it rides every screen as a
+  standing cue that more is below. Each click advances exactly one screen
+  (`nextScreen()` in `main.js`) and plays a nudge; on the last screen it hides
+  itself, since there is nothing left to point at.
+- **Fill modes matter here.** `.arrow` and the header button reveal with
+  `backwards` fill, not `both`. `both` holds opacity at the keyframe's end value
+  forever, which would beat the `.is-hidden` rule that later fades them out;
+  `backwards` covers the pre-delay period and then hands opacity back to the
+  declared value. If you add another element that both reveals and later hides,
+  use `backwards`.
+- **Load-in reveal** — wordmark, `learn more`, tagline, arrow, then headline
+  fade up in turn,
   as CSS animations with `both` fill so nothing flashes before its delay. The
   arrow and headline animate opacity only, since both already own a `transform`
   that a `translateY` would clobber. `REVEAL_HEADLINE` in `main.js` keeps the
   typewriter's start in sync with the headline's delay — change both together.
+
+## Verifying
+
+Headless Chrome with `--virtual-time-budget` advances `setTimeout` but **not CSS
+animations, CSS transitions, or scroll events**. So in that environment:
+
+- a transitioning property reports its *start* value forever — an element with
+  `transition: opacity` reads `1` even after `.is-hidden` applies, while an
+  untransitioned property in the same rule (`pointer-events`) flips immediately;
+- scroll handlers never run, so `window.dispatchEvent(new Event('scroll'))` is
+  needed to drive them by hand;
+- `scrollIntoView({ behavior: 'smooth' })` never completes.
+
+To assert on the real cascade, neutralise the time-driven parts first
+(`el.style.animation = 'none'; el.style.transition = 'none'`), or scrub an
+animation with `el.getAnimations()` and set `currentTime`. Verify numerically
+rather than by screenshot, then confirm in a real browser.
 
 ## Local preview
 
