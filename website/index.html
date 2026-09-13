@@ -85,13 +85,31 @@
   <section class="screen screen--text" id="join">
     <h2 class="screen__title">join now!</h2>
 
+    <!-- Step 1 is the account creation: there is no sign-up form anywhere,
+         the first text is what creates the user. So it needs to be one tap.
+         The "?&body=" spelling is the one both iOS and Android accept — iOS
+         wants the ampersand, Android tolerates it. -->
     <ol class="steps">
-      <li>Click the link and add whirlpool as a contact</li>
-      <li>Text links and notes and whatever comes to your mind. Whirlpool won’t bother you but feel free to ask it questions</li>
-      <li>When you’re ready for the webview, login on this website, put in your phone number, and you’ll recieve a code to log into your specific webview - no account needed!</li>
+      <!-- The whole step sits in one span. `.steps li` is a two-column grid, so
+           an inline element makes each surrounding run of text its own grid
+           item and the line stacks one word per row. -->
+      <li><span><a class="steps__link" id="sms-link" href="sms:+15550100?&body=hey%20whirlpool">Text whirlpool</a> to start — that first message is your account</span></li>
+      <li><span>Text links and notes and whatever comes to your mind. Whirlpool won’t bother you but feel free to ask it questions</span></li>
+      <li><span>When you’re ready for the webview, login on this website, put in your phone number, and you’ll recieve a code to log into your specific webview - no account needed!</span></li>
     </ol>
 
-    <a class="btn" href="./login.html">login</a>
+    <!-- Leaves for the app origin. Login lives there, not here: the session
+         cookie is set by the API, and a cookie set on one origin cannot be
+         read by another without SameSite=None, which browsers are steadily
+         switching off. -->
+    <a class="btn" id="login-link" href="https://app.whirlpool.xyz/login">login</a>
+
+    <!-- Carrier disclosure. A2P campaign review looks for this on the page
+         that describes the opt-in, and it has to be true of what you send. -->
+    <p class="fineprint">
+      Msg &amp; data rates may apply. Reply STOP to opt out, HELP for help.
+      <a href="./privacy.html">Privacy</a>
+    </p>
   </section>
 
   <!-- site.js first: it defines WP_CURSOR, which main.js reads for the swirl. -->

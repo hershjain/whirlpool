@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>privacy — whirlpool</title>
+  <meta name="description" content="What whirlpool stores, why, and how to get rid of it." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="chrome">
+    <a class="wordmark" href="./index.html">whirlpool.</a>
+  </header>
+
+  <main class="doc">
+    <h1>Privacy</h1>
+    <p class="doc__meta">Last updated 13 September 2026</p>
+
+    <p>
+      Whirlpool is a personal capture inbox. You text it links and thoughts, it
+      saves them, and it shows them back to you on a private board. This page
+      says what that means for your data in plain terms.
+    </p>
+
+    <h2>What is stored</h2>
+    <ul>
+      <li>Your phone number. It is the account — there is no email, password or username.</li>
+      <li>The messages you send, as received, along with anything extracted from links you share (title, author, article text, preview image).</li>
+      <li>Summaries and tags generated for your saves, and the questions you ask along with the answers given.</li>
+      <li>Login codes, stored only as a one-way hash, and browser sessions, likewise.</li>
+    </ul>
+
+    <h2>Who it is shared with</h2>
+    <p>
+      Nobody, other than the services needed to run it: Twilio carries the text
+      messages, and Anthropic's API generates the summaries, tags and answers.
+      The contents of your saves are sent to Anthropic for that purpose. Your
+      data is not sold, and it is not used for advertising.
+    </p>
+
+    <h2>Consent and opting out</h2>
+    <p>
+      You opt in by texting Whirlpool. That first message is the sign-up. Reply
+      <strong>STOP</strong> at any time to stop receiving messages, or
+      <strong>HELP</strong> for the list of commands. Message and data rates may
+      apply, and message frequency varies — Whirlpool only replies when you ask
+      it something or request a login code.
+    </p>
+
+    <h2>Deleting things</h2>
+    <p>
+      Any individual save can be deleted from the board, which removes it and
+      everything derived from it. To delete your account and everything in it,
+      text Whirlpool and ask.
+    </p>
+
+    <h2>Security, honestly stated</h2>
+    <p>
+      Access is by a code sent to your phone. That is convenient and reasonably
+      safe, but it is worth knowing what it rests on: anyone who controls your
+      phone number — through a SIM swap, or simply by holding an unlocked
+      phone — can read the code and get in. Do not store anything in Whirlpool
+      you would not want read by someone holding your phone.
+    </p>
+
+    <h2>Contact</h2>
+    <p>
+      Questions about any of this: text Whirlpool, or email the address on the
+      landing page.
+    </p>
+
+    <p class="doc__back"><a href="./index.html">&larr; back</a></p>
+  </main>
+
+  <script src="./site.js"></script>
+</body>
+</html>

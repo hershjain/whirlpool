@@ -1,9 +1,13 @@
 # Whirlpool
 
-A personal SMS capture inbox: text it a link, a thought, or an idea and it's
-silently saved, summarized, and tagged with Claude. It only replies when you
-actually ask it something — a question about what you've saved, or one of
-its commands.
+An SMS capture inbox: text it a link, a thought, or an idea and it's silently
+saved, summarized, and tagged with Claude. It only replies when you actually
+ask it something — a question about what you've saved, or one of its commands.
+
+Each phone number is its own account with its own saves. There is no sign-up
+form: the first text from a number creates the account, and that message is
+also the opt-in record. The web canvas is reached by logging in with a code
+sent to the same number.
 
 ## How it works
 
@@ -21,6 +25,37 @@ its commands.
   automatically.
 - **list** / **recent**: your 5 most recent saves.
 - **search \<term\>**: keyword search across your saves.
+- **STOP** / **START**: opt out of and back into messages. Recognised as whole
+  messages only, so "stop doing that" is still saved as a thought.
+
+## Logging in to the canvas
+
+There is no password. `/login` takes a phone number, the server sends a
+six-digit code to it, and entering the code sets a 30-day session cookie
+scoped to that number. Everything under `/api` reads the phone off that
+session, so two people who log in see two different boards.
+
+Only a number that has already texted Whirlpool can get a code. That
+prerequisite is stated on the login page, because the endpoint deliberately
+cannot say so itself: it answers identically whether or not the number is
+known, or is rate limited, or opted out. Anything else would turn it into a
+way to ask "does this person use Whirlpool", which for a product made of what
+someone reads is worth not answering.
+
+**Codes are not sent until Twilio A2P registration is done.** US carriers drop
+messages from unregistered long codes. Until then run with
+`LOGIN_CODE_TRANSPORT=console`, the default, and the code is printed to the
+server log instead — the whole flow works, it just does not use a carrier. Set
+`LOGIN_CODE_TRANSPORT=sms` when a registered sender exists. The server refuses
+to boot in console mode under `NODE_ENV=production`, so the dev path cannot
+ship by accident.
+
+Before submitting an A2P campaign, note that the reasons it gets rejected are
+usually on the public site rather than in the code. `website/` now carries the
+opt-in description, the "Msg & data rates may apply. Reply STOP to opt out,
+HELP for help" disclosure and a privacy policy for that reason. One thing to
+get right on the form: this number sends both a login code and conversational
+replies, so a campaign registered as pure 2FA is a use-case mismatch.
 
 Prompts live in `prompts/*.md` as versioned files — edit them directly to
 tune tone/behavior; the version marker in each file is logged alongside
@@ -116,6 +151,15 @@ and photo. Not automated here; worth adding later if you want the polish.
 ## Notes on scope
 
 - Images/MMS are not handled in this MVP — only links and text.
+- Login codes are only sent to +1 numbers. The allowlist is in `src/phone.ts`
+  and exists to close off SMS pumping, where someone drives thousands of code
+  requests at premium ranges they earn a cut of and leaves you the bill.
+- Rate limits live in memory, so they reset on deploy. Fine for one process on
+  one machine; move them to the database before running more than one.
+- A phone number is the whole identity, so the usual caveat applies: anyone who
+  controls the number — a SIM swap, or an unlocked phone on a table — can read
+  the code and get in. Appropriate for a personal reading inbox, worth knowing
+  you have accepted.
 - Instagram and paywalled links will often only capture a title/caption
   (see `content_fidelity` on each saved item) rather than full content —
   this is a platform-access limitation, not something more prompting can

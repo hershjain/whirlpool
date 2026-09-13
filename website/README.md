@@ -7,8 +7,8 @@ pages and assets in this folder as they're designed.
 
 - `index.html` — the whole landing page: hero, how it works, why, try now, as
   four full-viewport screens you scroll through in order
-- `login.html` — the only screen that is not part of the landing page, because it
-  will hand off to the canvas webview. Deliberately blank apart from the logo.
+- `privacy.html` — a plain prose page, not a screen. Required for the Twilio A2P
+  campaign submission and linked from the fine print on the try-now screen.
 - `site.js` — shared chrome: currently the trail cursor. Loaded by every page.
 - `main.js` — the landing page only: hero layout, typewriter, tile swirl, and
   the arrow / `learn more` scroll state. Loaded after `site.js`, which hands it
@@ -18,6 +18,23 @@ pages and assets in this folder as they're designed.
   518x400. It renders ~340px wide on a desktop viewport, about 1.5x density, and
   is capped at 440. If you swap the file, update the `<img>`'s `width`/`height`
   **attributes** to match: they're what reserves the box before it decodes.
+
+## Two placeholders to fill in before this goes live
+
+Both are in `index.html` and both are currently pointing at nothing real:
+
+- `#sms-link` — `sms:+15550100?&body=...`. Replace with the actual Twilio
+  number. This link is the sign-up: there is no form anywhere in the product,
+  the first text is what creates the account, so this is the top of the funnel.
+  Keep the `?&body=` spelling — iOS wants the ampersand and Android tolerates
+  it, while `?body=` alone fails on iOS.
+- `#login-link` — `https://app.whirlpool.xyz/login`. Replace with wherever the
+  Node app is deployed.
+
+Login is **not** on this site. It is served by the app at `/login`, because the
+session cookie is set by that origin and a cookie set on one origin cannot be
+read by another without `SameSite=None`, which browsers are steadily switching
+off. This site links out to it.
 
 ## Notes
 

@@ -1,0 +1,196 @@
+/* whirlpool — login.
+ *
+ * This page is the seam between two visual languages: the marketing site
+ * (Space Mono, ink on paper, hard edges) and the canvas (Inter, cards,
+ * chrome). It takes the marketing site's, because it is the continuation of a
+ * click that happened there. Tokens are copied from website/style.css rather
+ * than shared, since the two are separate deploys with no build step between
+ * them — if you change a colour there, change it here. */
+
+:root {
+  --cyan: #00c0e8;
+  --ink: #000000;
+  --paper: #ffffff;
+  --muted: #6b6b6b;
+  --error: #b00020;
+  --mono: 'Necto Mono', 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --edge: clamp(14px, 3.2vw, 36px);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+}
+
+.chrome {
+  position: fixed;
+  top: var(--edge);
+  left: var(--edge);
+}
+
+.wordmark {
+  font-size: clamp(1rem, 2.2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.login {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  /* Vertical padding via padding-block so the horizontal gutter is never
+     zeroed by a shorthand. */
+  padding-inline: var(--edge);
+  padding-block: calc(var(--edge) * 3);
+}
+
+/* Author styles beat the user-agent sheet, so `.step { display: flex }` would
+   otherwise override the `display: none` that the hidden attribute relies on,
+   and both steps would render at once. This has to come first and carry the
+   !important, or `hidden` is decorative on any element given a display. */
+[hidden] {
+  display: none !important;
+}
+
+.step {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+  text-align: center;
+}
+
+.step__title {
+  margin: 0;
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.step__lead {
+  margin: 0;
+  font-size: clamp(0.85rem, 1.5vw, 1.05rem);
+  line-height: 1.5;
+}
+
+.step__aside {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.step__aside a,
+.linkish {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.dot { margin: 0 .4em; }
+
+/* A button that reads as a link: resend and change-number are actions, not
+   navigation, so they must be buttons for a screen reader and the keyboard,
+   but they should not compete with the real submit button. */
+.linkish {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: inherit;
+  cursor: pointer;
+}
+
+.linkish:disabled {
+  cursor: default;
+  opacity: .5;
+  text-decoration: none;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  text-align: left;
+}
+
+.field__label {
+  font-size: .75rem;
+  text-transform: lowercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+
+.field__input {
+  width: 100%;
+  padding: .7em .8em;
+  border: 1px solid var(--ink);
+  border-radius: 6px; /* the 6px the marketing site's .btn established */
+  background: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1rem; /* never below 16px: iOS zooms the viewport on a smaller one */
+}
+
+.field__input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+
+/* The code is six characters read back one at a time, so it gets tracking and
+   size the phone number does not need. */
+.field__input--code {
+  font-size: 1.5rem;
+  letter-spacing: .5em;
+  text-align: center;
+  padding-inline: .4em;
+}
+
+.btn {
+  padding: .7em .9em;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color .25s ease, border-color .25s ease, color .25s ease;
+}
+
+.btn:hover,
+.btn:focus-visible {
+  background: var(--cyan);
+  color: var(--ink);
+  border-color: transparent; /* transparent, not border:0, so the box keeps its size */
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: .45;
+  background: none;
+  border-color: var(--ink);
+}
+
+.error {
+  max-width: 26rem;
+  margin: 1.2rem 0 0;
+  color: var(--error);
+  font-size: .85rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+}

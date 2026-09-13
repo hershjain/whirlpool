@@ -16,6 +16,11 @@
     <span id="toolbar-title">Whirlpool</span>
     <span id="toolbar-hint">Drag to move · Scroll to zoom · Click a card to open it</span>
     <button type="button" id="filter-toggle" aria-expanded="true" aria-controls="filter-bar">Filters</button>
+    <!-- Whose board this is, and the way out. Populated by canvas.js from
+         GET /api/me; stays empty rather than showing a placeholder if that
+         call fails, since a wrong number here would be worse than none. -->
+    <span id="toolbar-who"></span>
+    <button type="button" id="logout">Log out</button>
   </div>
   <div id="filter-bar"></div>
   <div id="viewport">

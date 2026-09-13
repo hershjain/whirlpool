@@ -86,6 +86,42 @@ html, body {
   color: var(--text);
 }
 
+/* The account pair sits at the right end of the toolbar. #filter-toggle owns
+   the margin-left: auto that pushes this whole group over, so these two just
+   follow it rather than each claiming their own auto margin. */
+#toolbar-who {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#logout {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#logout:hover {
+  color: var(--text);
+}
+
+#logout:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+/* The hint is the first thing worth dropping when the bar gets tight - the
+   account controls and the filter button are all actionable, and it is not. */
+@media (max-width: 720px) {
+  #toolbar-hint { display: none; }
+}
+
 /* Sits directly under the 48px toolbar, overlaying the canvas the same way. */
 #filter-bar {
   position: fixed;

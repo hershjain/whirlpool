@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>log in — whirlpool</title>
+  <meta name="description" content="Log in to whirlpool with a code sent to your phone." />
+  <meta name="robots" content="noindex" />
+
+  <!-- Same stand-in as the marketing site: the design calls for Necto Mono,
+       which is proprietary. This page is the continuation of a click on that
+       site, so it carries that site's type rather than the canvas's Inter. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" />
+  <link rel="stylesheet" href="/login.css" />
+</head>
+<body>
+  <header class="chrome">
+    <span class="wordmark">whirlpool.</span>
+  </header>
+
+  <main class="login">
+    <!-- Step 1: the phone number. -->
+    <form class="step" id="phone-step" novalidate>
+      <h1 class="step__title">log in</h1>
+      <p class="step__lead">
+        Enter the number you text Whirlpool from. We'll send you a code.
+      </p>
+
+      <label class="field">
+        <span class="field__label">phone number</span>
+        <input
+          class="field__input"
+          id="phone"
+          name="phone"
+          type="tel"
+          autocomplete="tel"
+          inputmode="tel"
+          placeholder="(555) 123-4567"
+          required
+        />
+      </label>
+
+      <button class="btn" type="submit" id="phone-submit">send code</button>
+
+      <!-- The real failure case is someone who has never texted in, so the
+           way out of it is on screen from the start rather than behind an
+           error they can never trigger. -->
+      <p class="step__aside">
+        Haven't texted Whirlpool yet? You need to do that first —
+        <a id="join-link" href="/login">here's how</a>.
+      </p>
+    </form>
+
+    <!-- Step 2: the code. Same page, no navigation, so a back button never
+         strands someone between the two halves of one flow. -->
+    <form class="step" id="code-step" hidden novalidate>
+      <h1 class="step__title">enter your code</h1>
+      <!-- Fixed wording, whatever actually happened. Anything conditional here
+           would answer "does this number have an account?" for anyone who
+           cared to ask, which for a product made of what you read is a real
+           thing to leak. -->
+      <p class="step__lead" id="sent-note">
+        If that number has texted Whirlpool, a code is on its way.
+      </p>
+
+      <label class="field">
+        <span class="field__label">6-digit code</span>
+        <!-- one-time-code plus a numeric inputmode is what makes iOS and
+             Android offer the code straight from the notification. -->
+        <input
+          class="field__input field__input--code"
+          id="code"
+          name="code"
+          type="text"
+          autocomplete="one-time-code"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          maxlength="6"
+          placeholder="000000"
+          required
+        />
+      </label>
+
+      <button class="btn" type="submit" id="code-submit">log in</button>
+
+      <p class="step__aside">
+        <button class="linkish" type="button" id="resend" disabled>resend code</button>
+        <span class="dot">·</span>
+        <button class="linkish" type="button" id="change-number">use a different number</button>
+      </p>
+    </form>
+
+    <p class="error" id="error" role="alert" hidden></p>
+  </main>
+
+  <script src="/login.js"></script>
+</body>
+</html>

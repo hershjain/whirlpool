@@ -3,6 +3,8 @@ const world = document.getElementById("world");
 const emptyState = document.getElementById("empty-state");
 const filterBar = document.getElementById("filter-bar");
 const filterToggle = document.getElementById("filter-toggle");
+const toolbarWho = document.getElementById("toolbar-who");
+const logoutBtn = document.getElementById("logout");
 
 // Every rendered card paired with the item it came from, so filtering can
 // reposition and restore without refetching.
@@ -156,11 +158,28 @@ const EMPTY_FOLDER_H = 260;
 const TOOLBAR_H = 48; // #toolbar's fixed height in style.css
 const FIT_MARGIN = 48; // breathing room left around the board when framing it
 
+// A session can expire or be revoked while the tab is open, at which point
+// every /api call starts coming back 401. Without this the JSON parse throws
+// and the board just stops working with nothing on screen to explain it.
+function bounceToLogin() {
+  window.location.replace("/login");
+  // Never resolves: callers are mid-async and should not carry on rendering
+  // against a page that is already navigating away.
+  return new Promise(() => {});
+}
+
+async function getJson(url) {
+  const res = await fetch(url, { credentials: "same-origin" });
+  if (res.status === 401) return bounceToLogin();
+  if (!res.ok) throw new Error(`${url} failed: ${res.status}`);
+  return res.json();
+}
+
 async function loadItems() {
   const [items, sources, folderList] = await Promise.all([
-    fetch("/api/items").then((res) => res.json()),
-    fetch("/api/sources").then((res) => res.json()),
-    fetch("/api/folders").then((res) => res.json()),
+    getJson("/api/items"),
+    getJson("/api/sources"),
+    getJson("/api/folders"),
   ]);
   folders = folderList;
   const sourceByHostname = new Map(sources.map((source) => [source.hostname, source]));
@@ -999,7 +1018,7 @@ async function createFolderAndFile(item, name) {
 
 async function refreshFolders() {
   try {
-    folders = await fetch("/api/folders").then((res) => res.json());
+    folders = await getJson("/api/folders");
     // A folder that just lost its last card has no chip any more, so leaving
     // its square open would strand it on the board with no way to close it.
     for (const folder of folders) {
@@ -1182,3 +1201,31 @@ async function savePosition(id, x, y) {
 
 applyTransform();
 loadItems();
+
+
+// --- Who is looking at this board ---
+
+// The canvas is one person's saved reading. On a shared laptop the only cue
+// that you are looking at your own is this line, so it is worth the request.
+async function loadIdentity() {
+  try {
+    const me = await getJson("/api/me");
+    toolbarWho.textContent = me.phone;
+  } catch {
+    // Non-fatal: the board itself is already loading. Better a missing label
+    // than a wrong one.
+  }
+}
+
+logoutBtn.addEventListener("click", async () => {
+  logoutBtn.disabled = true;
+  try {
+    await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+  } catch {
+    // Revoking server-side is the point, but if the request never lands the
+    // right move is still to leave - the cookie stops being used either way.
+  }
+  window.location.replace("/login");
+});
+
+loadIdentity();

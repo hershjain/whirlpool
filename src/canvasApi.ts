@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { config } from "./config.js";
 import {
   listAllItems,
   updateItemPosition,
@@ -10,14 +9,25 @@ import {
   updateFolderPosition,
 } from "./repo.js";
 import { prisma } from "./db.js";
+import { requireSession, rejectCrossSite } from "./httpAuth.js";
+import { maskPhone } from "./phone.js";
 
 export const canvasRouter: Router = Router();
 
-// No real auth yet - single user for now, so every request is scoped to the
-// one configured owner. This goes away once magic-link auth exists (Phase 3).
+// Every route below is scoped to the phone number on the session cookie.
+// Nothing here reads the configured owner any more: this router used to serve
+// one hardcoded person's board to anyone who found the URL, DELETE included.
+canvasRouter.use(rejectCrossSite);
+canvasRouter.use(requireSession);
 
-canvasRouter.get("/items", async (_req, res) => {
-  const items = await listAllItems(config.ownerPhoneNumber);
+// Whose board this is, for the toolbar. Masked rather than full: enough for
+// someone on a shared machine to recognise, not enough to read off a screen.
+canvasRouter.get("/me", (req, res) => {
+  res.json({ phone: maskPhone(req.phone!) });
+});
+
+canvasRouter.get("/items", async (req, res) => {
+  const items = await listAllItems(req.phone!);
   res.json(items);
 });
 
@@ -58,7 +68,7 @@ canvasRouter.patch("/items/:id/position", async (req, res) => {
     return;
   }
 
-  const updated = await updateItemPosition(config.ownerPhoneNumber, id, x, y);
+  const updated = await updateItemPosition(req.phone!, id, x, y);
   if (!updated) {
     res.status(404).json({ error: "Item not found" });
     return;
@@ -67,7 +77,7 @@ canvasRouter.patch("/items/:id/position", async (req, res) => {
 });
 
 canvasRouter.delete("/items/:id", async (req, res) => {
-  const deleted = await deleteItem(config.ownerPhoneNumber, req.params.id);
+  const deleted = await deleteItem(req.phone!, req.params.id);
   if (!deleted) {
     res.status(404).json({ error: "Item not found" });
     return;
@@ -77,8 +87,8 @@ canvasRouter.delete("/items/:id", async (req, res) => {
 
 // --- Folders: user-made collections ---
 
-canvasRouter.get("/folders", async (_req, res) => {
-  const folders = await listFolders(config.ownerPhoneNumber);
+canvasRouter.get("/folders", async (req, res) => {
+  const folders = await listFolders(req.phone!);
   res.json(folders);
 });
 
@@ -90,7 +100,7 @@ canvasRouter.post("/folders", async (req, res) => {
     return;
   }
 
-  const folder = await createFolder(config.ownerPhoneNumber, name);
+  const folder = await createFolder(req.phone!, name);
   // createFolder only returns null when the trimmed name was empty, which the
   // check above already rules out - but keep the guard rather than assert.
   if (!folder) {
@@ -109,7 +119,7 @@ canvasRouter.patch("/items/:id/folder", async (req, res) => {
     return;
   }
 
-  const updated = await setItemFolder(config.ownerPhoneNumber, id, folderId);
+  const updated = await setItemFolder(req.phone!, id, folderId);
   if (!updated) {
     res.status(404).json({ error: "Item or folder not found" });
     return;
@@ -125,7 +135,7 @@ canvasRouter.patch("/folders/:id/position", async (req, res) => {
     return;
   }
 
-  const updated = await updateFolderPosition(config.ownerPhoneNumber, req.params.id, x, y);
+  const updated = await updateFolderPosition(req.phone!, req.params.id, x, y);
   if (!updated) {
     res.status(404).json({ error: "Folder not found" });
     return;

@@ -3,6 +3,7 @@ import { extractFromUrl, isMusicUrl } from "./linkExtract.js";
 import { resolveSourceProfileForCapture } from "./sourceProfile.js";
 import { enrichLink, enrichNote, enrichmentInput, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
+import { setOptedOut } from "./users.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
 
@@ -15,6 +16,12 @@ const HELP_TEXT = [
   "- or ask a question about what you've saved, and I'll answer",
 ].join("\n");
 
+// The standard carrier opt-out/opt-in words. Recognised on their own only:
+// "stop" alone is an instruction, while "stop doing that" is a thought worth
+// saving, and treating the second as the first would silently mute someone.
+const STOP_KEYWORDS = new Set(["stop", "stopall", "unsubscribe", "cancel", "end", "quit"]);
+const START_KEYWORDS = new Set(["start", "unstop", "yes"]);
+
 // Returns null when the message was captured silently (the normal case);
 // returns a string only when a reply is actually owed - a command's output,
 // a chat answer, or (via a thrown error bubbling up to the caller) a failure.
@@ -25,6 +32,26 @@ export async function handleInboundMessage(
 ): Promise<string | null> {
   const trimmed = body.trim();
   const lower = trimmed.toLowerCase();
+
+  // Carrier keywords come first, ahead of everything including the URL match.
+  // Twilio acts on these itself - STOP blocks our sends at their end whatever
+  // we do - but if we do not claim them here they fall through to the
+  // classifier and get filed as saved thoughts, so someone's board ends up
+  // with a note reading "STOP". Mirroring the opt-out locally also stops us
+  // queueing a login code that the carrier will refuse to deliver.
+  if (STOP_KEYWORDS.has(lower)) {
+    await setOptedOut(phone, true);
+    return null; // Twilio sends its own confirmation; a second one is spam
+  }
+
+  if (START_KEYWORDS.has(lower)) {
+    await setOptedOut(phone, false);
+    return "You're opted back in. Text me anything to save it.";
+  }
+
+  if (lower === "help" || lower === "info") {
+    return HELP_TEXT;
+  }
 
   const urlMatch = trimmed.match(URL_REGEX);
   if (urlMatch) {
@@ -41,10 +68,6 @@ export async function handleInboundMessage(
 
   if (lower.startsWith("search ")) {
     return handleSearch(phone, trimmed.slice("search ".length).trim());
-  }
-
-  if (lower === "help") {
-    return HELP_TEXT;
   }
 
   const classification = await classifyMessage(trimmed);

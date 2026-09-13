@@ -118,3 +118,61 @@ model ProcessedMessage {
   messageSid String   @id
   createdAt  DateTime @default(now())
 }
+
+// --- Identity and sessions ---
+
+// A person, keyed by the phone number they text from. Item/Folder/ChatTurn
+// already carry `phone` as a tenant key and deliberately keep no foreign key
+// to this table: those rows predate it, and a required relation would make
+// the migration fail on every save captured before login existed.
+//
+// A row is created by the first inbound message from a number - that text is
+// both the sign-up and the consent record, which is why the message's SID is
+// stored alongside it.
+model User {
+  phone           String    @id // E.164, e.g. "+14155551234"
+  optInAt         DateTime  @default(now())
+  optInMessageSid String? // the inbound message that created this user
+  // Set when they text STOP. Twilio blocks our sends to an opted-out number
+  // anyway (error 21610); mirroring it here means we never attempt the doomed
+  // send, and never sit a user in front of a code that cannot arrive.
+  optedOutAt      DateTime?
+  lastSeenAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+
+  loginCodes LoginCode[]
+  sessions   Session[]
+}
+
+// A pending login code. Only the hash is stored - a database dump must not
+// hand over live codes. Rows are kept after use rather than deleted so a
+// burst of requests is visible; sweepLoginCodes() prunes them.
+model LoginCode {
+  id         String    @id @default(cuid())
+  phone      String
+  user       User      @relation(fields: [phone], references: [phone])
+  codeHash   String
+  expiresAt  DateTime
+  // Wrong guesses against this code. At MAX_CODE_ATTEMPTS the code is dead
+  // even if the next guess is right - that is what makes six digits enough.
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+// A logged-in browser. The cookie holds a random token; this holds its hash,
+// so the table cannot be read to mint cookies.
+model Session {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  phone      String
+  user       User      @relation(fields: [phone], references: [phone])
+  expiresAt  DateTime
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone])
+}

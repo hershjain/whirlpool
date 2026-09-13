@@ -269,6 +269,33 @@ body { overflow-x: hidden; }
 
 .steps li::before { content: "(" counter(step) ")"; }
 
+/* The only inline link in the copy, and it is the one that starts the whole
+   product, so it is underlined rather than left to the cursor to reveal. */
+.steps__link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.steps__link:hover,
+.steps__link:focus-visible {
+  background: var(--cyan);
+}
+
+/* Carrier disclosure under the login button. Small and grey: it is required
+   on the page, not part of the pitch. */
+.fineprint {
+  margin: 0;
+  max-width: 48ch;
+  font-size: clamp(0.62rem, 1.1vw, 0.72rem);
+  line-height: 1.6;
+  opacity: .6;
+  text-align: center;
+}
+
+.fineprint a { color: inherit; }
+
 /* A page that is deliberately blank still has to fill the viewport in white. */
 .page {
   min-height: 100vh;
@@ -459,4 +486,55 @@ body { overflow-x: hidden; }
   .tagline,
   .btn,
   .headline { animation: none; opacity: 1; }
+}
+
+/* ------------------------------------------------------------- doc pages */
+
+/* Privacy and anything else that is a page of prose rather than a screen.
+   Nothing is needed to disable the landing page's scroll snapping here:
+   `scroll-snap-type` on html only does anything when the page contains
+   elements with `scroll-snap-align`, and only `.screen` carries that. Doing
+   it with `html:has(.doc-page)` would be the obvious move and is exactly the
+   kind of newer selector this project avoids. */
+.doc {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding-inline: var(--edge);
+  padding-block: calc(var(--edge) * 4) calc(var(--edge) * 3);
+  font-size: var(--copy);
+  line-height: 1.65;
+}
+
+.doc h1 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+  margin: 0 0 .2em;
+}
+
+.doc h2 {
+  font-size: clamp(1rem, 2.2vw, 1.2rem);
+  margin: 2em 0 .5em;
+}
+
+.doc__meta {
+  margin: 0 0 2em;
+  opacity: .55;
+  font-size: .8em;
+}
+
+.doc ul {
+  padding-left: 1.2em;
+}
+
+.doc li + li { margin-top: .5em; }
+
+.doc a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.doc__back {
+  margin-top: 3em;
+  opacity: .6;
 }
