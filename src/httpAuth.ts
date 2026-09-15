@@ -24,7 +24,11 @@ export function setSessionCookie(res: Response, token: string): void {
     // top-level navigation and bounce the user straight back to /login.
     sameSite: "lax",
     path: "/",
-    maxAge: 30 * 24 * 60 * 60 * 1000,
+    // No maxAge and no expires, deliberately: that makes this a session
+    // cookie, which the browser drops when it quits. Whatever the browser
+    // chooses to preserve, the row itself expires after SESSION_TTL_MS, so
+    // nothing here is the only thing standing between a closed laptop and
+    // somebody's saved reading.
   });
 }
 

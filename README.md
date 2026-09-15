@@ -50,8 +50,10 @@ renamed when the sites merged.
 ## Logging in to the canvas
 
 There is no password. `/login` takes a phone number, the server sends a
-six-digit code to it, and entering the code sets a 30-day session cookie
-scoped to that number. Everything under `/api` reads the phone off that
+six-digit code to it, and entering the code sets a session cookie scoped to
+that number. The cookie carries no expiry, so the browser drops it when it
+quits, and the session row expires after 24 hours regardless of what the
+browser chose to keep. Everything under `/api` reads the phone off that
 session, so two people who log in see two different boards.
 
 Only a number that has already texted Whirlpool can get a code. That
@@ -106,11 +108,15 @@ changes later.
    - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` — from
      the Twilio console
    - `OWNER_PHONE_NUMBER` — your own phone number, in E.164 format
-     (`+1XXXXXXXXXX`). Only messages from this number are processed.
+     (`+1XXXXXXXXXX`). Only used to seed the first `User` row on an existing
+     install; every number is accepted now, and `/api` is scoped by session.
    - `ANTHROPIC_API_KEY` — from the Anthropic console
    - `PUBLIC_BASE_URL` — the public HTTPS URL this app will be reachable at
-     (see deployment below). Used to validate that inbound webhook requests
-     really came from Twilio.
+     (see deployment below). **A bare origin: no path, no trailing slash.**
+     Three things read it — Twilio webhook signature validation, the `Origin`
+     allowlist that rejects cross-site writes, and the domain in the login
+     text's one-time-code line, which must match the origin serving `/login`
+     or iOS won't offer to autofill it.
 
 3. **Set up the database**
 

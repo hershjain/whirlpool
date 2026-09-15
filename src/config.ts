@@ -50,6 +50,15 @@ export const config = {
   port: Number(process.env.PORT ?? 3000),
 
   isProduction,
+
+  // DEV-LOGIN: a one-click way past the login flow while A2P registration is
+  // pending. Tied to NODE_ENV rather than a variable of its own, so there is
+  // no value you can set that turns this on in production - and nothing to
+  // remember on deploy day. The four pieces are all tagged DEV-LOGIN and come
+  // out together: this flag, the /auth/dev-login routes, the button in
+  // public/login.html, and the reveal in public/login.js.
+  devLogin: !isProduction,
+
   loginCodeTransport: transport as "sms" | "console",
 
   // Ceiling on codes sent per calendar day across every user. Not a fairness

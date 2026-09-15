@@ -33,10 +33,15 @@ html, body {
   left: var(--edge);
 }
 
+/* Mirrors website/style.css's .wordmark exactly, because this is the same
+   wordmark: no weight and no tracking of its own, so it inherits 400 with
+   default spacing the way the marketing site's does. color/text-decoration are
+   here because it is an <a> - a link home, as it is on every marketing page. */
 .wordmark {
-  font-size: clamp(1rem, 2.2vw, 1.35rem);
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  color: inherit;
+  text-decoration: none;
+  font-size: clamp(0.85rem, 2.2vw, 1.9rem);
+  line-height: 1;
 }
 
 .login {

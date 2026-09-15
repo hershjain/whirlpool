@@ -8,6 +8,10 @@
   --accent: #1d5fd6;
   --tag-bg: #eaf1fd;
   --tag-text: #1d5fd6;
+  /* The wordmark only - the rest of this page is the system sans below. Spelled
+     identically in style.css and login.css; nothing shares tokens between the
+     three sheets, so a licensed Necto Mono has to land in all three. */
+  --mono: 'Necto Mono', 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   /* Header bar for a note, or a link whose source hasn't resolved yet -
      everything else overrides these via --source-color/--source-text-color
      set inline per card. */
@@ -61,7 +65,10 @@ html, body {
 }
 
 #toolbar-title {
+  font-family: var(--mono);
   font-weight: 700;
+  /* Fixed px, not the landing page's clamp() idiom: this sits in a 48px flex
+     row that does not scale with the viewport. */
   font-size: 15px;
 }
 

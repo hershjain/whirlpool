@@ -171,3 +171,44 @@ codeInput.addEventListener("input", () => {
   // button, which is what the autofill flow expects to happen.
   if (digits.length === 6) codeStep.requestSubmit();
 });
+
+// --- DEV-LOGIN: local development only, remove before launch ---
+//
+// Ask first, show second. The button appears only when /auth/dev-login says the
+// bypass exists, so in production this block finds `enabled: false` and renders
+// nothing - and if the routes are removed and this is not, the fetch 404s and it
+// still renders nothing.
+(async () => {
+  const wrap = document.getElementById("dev-login-wrap");
+  const button = document.getElementById("dev-login");
+  if (!wrap || !button) return;
+
+  try {
+    const res = await fetch("/auth/dev-login", { credentials: "same-origin" });
+    if (!res.ok) return;
+    const { enabled } = await res.json();
+    if (!enabled) return;
+  } catch {
+    return;
+  }
+
+  wrap.hidden = false;
+
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      const res = await fetch("/auth/dev-login", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (res.status === 204) {
+        window.location.replace("/app");
+        return;
+      }
+      showError("Dev login failed. Check the server log.");
+    } catch {
+      showError("Dev login failed. Check the server log.");
+    }
+    button.disabled = false;
+  });
+})();

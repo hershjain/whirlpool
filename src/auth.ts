@@ -10,7 +10,11 @@ const CODE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 // for a search.
 const MAX_CODE_ATTEMPTS = 5;
 
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// A hard ceiling, independent of the cookie. The cookie below is a session
+// cookie and normally dies when the browser quits, but "restore tabs" can
+// carry one across a restart on Chrome and Safari, so the server does not
+// rely on that: the row is dead at 24 hours whatever the client kept.
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 // Writing lastSeenAt on every request would be a database write per API call
 // for a field nothing reads at that resolution.
 const SESSION_TOUCH_INTERVAL_MS = 60 * 60 * 1000;

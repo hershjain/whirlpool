@@ -17,7 +17,7 @@
 </head>
 <body>
   <header class="chrome">
-    <span class="wordmark">whirlpool.</span>
+    <a class="wordmark" href="/">whirlpool.</a>
   </header>
 
   <main class="login">
@@ -93,6 +93,13 @@
     </form>
 
     <p class="error" id="error" role="alert" hidden></p>
+
+    <!-- DEV-LOGIN: local development only, remove before launch. Hidden until
+         login.js confirms with the server that the bypass is live, so it can
+         never sit there as a dead control in production. -->
+    <p class="step__aside" id="dev-login-wrap" hidden>
+      <button class="btn" type="button" id="dev-login">skip login (dev)</button>
+    </p>
   </main>
 
   <script src="/login.js"></script>

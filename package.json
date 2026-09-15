@@ -9,6 +9,7 @@
     "dev:cli": "tsx src/dev-cli.ts",
     "dev:chat": "tsx src/dev-chat.ts",
     "build": "tsc -p tsconfig.json",
+    "prestart": "npm run build",
     "start": "node dist/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

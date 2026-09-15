@@ -101,6 +101,45 @@ authRouter.post("/verify", async (req, res) => {
   res.status(204).end();
 });
 
+// --- DEV-LOGIN: local development only, remove before launch ---
+//
+// GET reports whether the bypass exists, so the login page can show its button
+// only when it will work. POST mints a session for OWNER_PHONE_NUMBER with no
+// code at all. Both 404 under NODE_ENV=production, which is the same stance
+// config.ts takes on console-transport codes: a dev shortcut that survives
+// into production is an authentication bypass, so it is wired shut there
+// rather than left to a checklist.
+authRouter.get("/dev-login", (_req, res) => {
+  res.json({ enabled: config.devLogin });
+});
+
+authRouter.post("/dev-login", async (_req, res) => {
+  if (!config.devLogin) {
+    res.status(404).end();
+    return;
+  }
+
+  const phone = toE164(config.ownerPhoneNumber);
+  if (!phone) {
+    res.status(500).json({ error: "OWNER_PHONE_NUMBER is not a valid E.164 number" });
+    return;
+  }
+
+  // Session has a foreign key to User, so the row has to exist. optInAt
+  // defaults and optInMessageSid is nullable, so there is no fake consent
+  // record here - this user simply has no opt-in message, which is true.
+  await prisma.user.upsert({
+    where: { phone },
+    update: { lastSeenAt: new Date() },
+    create: { phone },
+  });
+
+  const token = await createSession(phone);
+  setSessionCookie(res, token);
+  console.log(`[dev-login] signed in as ${phone} with no code`);
+  res.status(204).end();
+});
+
 authRouter.post("/logout", async (req, res) => {
   await revokeSession(tokenFrom(req));
   clearSessionCookie(res);
