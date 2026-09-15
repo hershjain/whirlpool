@@ -1,0 +1,741 @@
+:root {
+  --bg: #f4f6fb;
+  --dot: #d7deec;
+  --card-bg: #ffffff;
+  --card-border: #e2e7f0;
+  --text: #1a2233;
+  --muted: #6b7386;
+  --accent: #1d5fd6;
+  --tag-bg: #eaf1fd;
+  --tag-text: #1d5fd6;
+  /* Header bar for a note, or a link whose source hasn't resolved yet -
+     everything else overrides these via --source-color/--source-text-color
+     set inline per card. */
+  --header-neutral: #e2e7f0;
+  --header-neutral-text: #4a5266;
+  /* Notes have no source to brand them - a legal-pad yellow marks them as
+     the user's own writing rather than something saved from a site. */
+  --note-color: #fbf3c4;
+  --note-text-color: #4a4326;
+  /* Folders are user-made collections, as against the model's tags/category -
+     green and rectangular, against the tags' pills, so the two never get
+     mistaken for one another. One translucent-green recipe serves the card
+     badge, the filter chips and the folder menu, so they read as one family. */
+  --folder-accent: #1f8b4c;
+  --folder-text: #17663a;
+  --folder-soft: rgba(31, 139, 76, 0.12);
+  --folder-soft-hover: rgba(31, 139, 76, 0.2);
+  /* The square on the board reads as a surface things sit on, so it carries
+     more weight than the chips do - the tile's own corner badge keeps the
+     lighter --folder-soft above. */
+  --folder-zone-fill: rgba(31, 139, 76, 0.3);
+  --folder-zone-edge: rgba(31, 139, 76, 0.45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#toolbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--card-border);
+  z-index: 10;
+  user-select: none;
+}
+
+#toolbar-title {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+#toolbar-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#filter-toggle {
+  margin-left: auto;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#filter-toggle:hover {
+  color: var(--text);
+}
+
+/* The account pair sits at the right end of the toolbar. #filter-toggle owns
+   the margin-left: auto that pushes this whole group over, so these two just
+   follow it rather than each claiming their own auto margin. */
+#toolbar-who {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#logout {
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#logout:hover {
+  color: var(--text);
+}
+
+#logout:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+/* The hint is the first thing worth dropping when the bar gets tight - the
+   account controls and the filter button are all actionable, and it is not. */
+@media (max-width: 720px) {
+  #toolbar-hint { display: none; }
+}
+
+/* Sits directly under the 48px toolbar, overlaying the canvas the same way. */
+#filter-bar {
+  position: fixed;
+  top: 48px;
+  left: 0;
+  right: 0;
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--card-border);
+  user-select: none;
+}
+
+/* This file's own `display: flex` above always beats the browser's built-in
+   `[hidden] { display: none }` rule - author styles win over the user-agent
+   stylesheet regardless of specificity - so without this override the
+   Filters toggle's `hidden` attribute set nothing visible; the bar stayed
+   displayed however #filter-toggle set it. */
+#filter-bar[hidden] {
+  display: none;
+}
+
+/* Same visual language as .card-tag so the bar reads as native. */
+.filter-chip {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tag-text);
+  background: var(--tag-bg);
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.filter-chip:hover {
+  border-color: var(--accent);
+}
+
+.filter-chip.is-active {
+  color: #fff;
+  background: var(--accent);
+}
+
+.filter-chip--folder {
+  border-radius: 6px; /* rectangle, against the pill-shaped category/tag chips */
+  color: var(--folder-text);
+  background: var(--folder-soft);
+}
+
+.filter-chip--folder:hover {
+  background: var(--folder-soft-hover);
+  border-color: var(--folder-zone-edge);
+}
+
+.filter-chip--folder.is-active {
+  color: #fff;
+  background: var(--folder-accent);
+}
+
+.filter-count {
+  font-weight: 500;
+  opacity: 0.65;
+}
+
+.filter-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--card-border);
+}
+
+#viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  background-image: radial-gradient(var(--dot) 1.5px, transparent 1.5px);
+  background-size: 28px 28px;
+}
+
+#viewport.panning {
+  cursor: grabbing;
+}
+
+#world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+.card {
+  position: absolute;
+  width: 240px; /* keep in sync with CARD_W in canvas.js */
+  background: var(--card-bg);
+  border-radius: 14px;
+  overflow: hidden; /* clips the header bar to the card's rounded corners */
+  /* No outline - the shadow alone separates the tile from the dotted canvas,
+     so it carries more weight than it did behind a border. */
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
+  cursor: grab;
+  user-select: none;
+}
+
+/* A cluster or ring re-flow settles rather than teleports. Excluded while
+   dragging so a live drag stays 1:1 with the cursor. */
+.card:not(.dragging) {
+  transition: left 0.28s ease, top 0.28s ease;
+}
+
+.card.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
+  z-index: 5;
+}
+
+/* Floating zoom controls, bottom right - same translucent treatment as the
+   toolbar so they read as chrome rather than as content on the canvas. */
+#zoom-controls {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
+}
+
+#zoom-controls button {
+  min-width: 34px;
+  padding: 7px 4px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+#zoom-controls button:hover {
+  background: var(--tag-bg);
+}
+
+#zoom-level {
+  min-width: 54px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums; /* stops the width jittering while zooming */
+  color: var(--muted);
+  border-left: 1px solid var(--card-border);
+  border-right: 1px solid var(--card-border);
+}
+
+/* Inter in place of Chirp on tweet cards only - see index.html. */
+.card--tweet .card-excerpt,
+.card--tweet .card-byline {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+/* Logo, then the site's name, then the delete control - the order is
+   positional now, so there's no space-between to fight the name for room. */
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--source-color, var(--header-neutral));
+  color: var(--source-text-color, var(--header-neutral-text));
+}
+
+.card-source-name {
+  /* Takes the slack between the logo and the X, and gives it back by
+     ellipsising rather than by pushing the X off the end of the bar. */
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Inherits the header's per-source text colour, so it stays legible on a dark
+   brand bar and a light one alike without a colour of its own. Muted until
+   hovered - it's destructive, and shouldn't be the loudest thing on the tile. */
+.card-delete {
+  flex-shrink: 0;
+  margin-left: auto; /* stays hard right even on a card with no logo */
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  opacity: 0.55;
+  cursor: pointer;
+}
+
+.card-delete:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* Takes over the bar in place of the name and the X while a tile is mid-
+   decision - same row, same colours, no dialog. */
+.card-delete-confirm {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.card--confirming .card-source-name,
+.card--confirming .card-delete {
+  display: none;
+}
+
+.card--confirming .card-delete-confirm {
+  display: flex;
+}
+
+.card-delete-ask {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.card-delete-confirm button {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  line-height: 1;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.card-delete-confirm button:hover {
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* Bottom-right corner of the tile, not the header bar - filing something is a
+   thing you do to the whole card, and the header now belongs to the source and
+   the delete control. .card is positioned, so this anchors to the tile. */
+.card-folder {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 3;
+  font: inherit;
+  font-size: 11px; /* matches .card-tag */
+  font-weight: 600;
+  padding: 3px 8px; /* matches .card-tag */
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--folder-text);
+  /* Plainly translucent now that it sits on the card body rather than a
+     per-source brand bar - the backdrop is known, so the tint no longer has to
+     be composited over an opaque base to stay legible. */
+  background: var(--folder-soft);
+  border: none;
+  border-radius: 7px; /* rectangle, against the tag pill's 999px */
+  cursor: pointer;
+}
+
+.card-folder:hover {
+  background: var(--folder-soft-hover);
+}
+
+/* An unfiled tile gets a "+" in a rounded square instead of a word. Grid
+   centring puts the glyph on the box's centre in both axes, which inline-flex
+   with a 14px glyph never quite managed. */
+.card-folder--empty {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  max-width: none;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.card-logo {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Flush to the card's edges - .card's overflow:hidden clips it to the
+   rounded corners. Fixed height so a wall of cards stays on a grid whatever
+   aspect ratio each og:image happens to be. */
+.card-hero {
+  display: block;
+  width: 100%;
+  height: 132px;
+  object-fit: cover;
+  background: var(--bg);
+  /* Without this the browser's native image drag lifts the picture off the
+     tile; the card's own pointer drag never gets the gesture. */
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+/* Posts, reels and image blocks are the image - give it room. Articles keep
+   the shorter .card-hero band above their summary. */
+.card-hero--tall {
+  height: 240px;
+}
+
+.card-body {
+  /* Extra room at the foot so the corner folder control never lands on the
+     last line of text or the tag row. */
+  padding: 14px 16px 36px;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.35;
+  margin: 0 0 2px;
+  overflow-wrap: anywhere;
+}
+
+.card-byline {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+/* Attribution beneath a post's own words, rather than above a headline. */
+.card-byline--under {
+  margin: 8px 0 10px;
+}
+
+/* The item's own words. The rule down the left marks it as quoted material -
+   what the tweet or caption actually says - as against the summary below,
+   which is written *about* the item and stays flush and grey. */
+.card-excerpt {
+  font-size: 13.5px;
+  color: var(--text);
+  line-height: 1.45;
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--card-border);
+  overflow-wrap: anywhere;
+  white-space: pre-line; /* captions carry their own line breaks */
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* A note is the user's own writing - nothing to distinguish it from, so no
+   rule and no indent. */
+.card-excerpt--plain {
+  padding-left: 0;
+  border-left: none;
+}
+
+.card-summary {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Expanded: drop the clamps and lift the tile over its neighbours. Cards are
+   absolutely positioned, so growing one moves nothing else. */
+.card--expanded {
+  z-index: 6;
+}
+
+.card--expanded .card-excerpt,
+.card--expanded .card-summary {
+  display: block;
+  -webkit-line-clamp: none;
+  overflow: visible;
+}
+
+.card-expand {
+  display: block;
+  width: fit-content;
+  margin: -4px 0 10px auto; /* auto left margin pushes it to the card's right edge */
+  padding: 1px 8px 3px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.card-expand:hover {
+  color: var(--text);
+}
+
+.card--broken .card-hero {
+  opacity: 0.45;
+  filter: grayscale(1);
+}
+
+.card-broken {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #8a2b2b;
+  background: #fdecec;
+  border-radius: 4px;
+}
+
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.card-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tag-text);
+  background: var(--tag-bg);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+/* --- Folder menu: a single floating popover, positioned per use --- */
+#folder-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 200px;
+  max-width: 260px;
+  padding: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
+  font-size: 13px;
+}
+
+/* Options render as the same chip as .filter-chip--folder (wrapping into a
+   row rather than a column of full-width rows) so picking a folder here looks
+   like picking one in the filter bar. */
+.folder-menu-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+}
+
+.folder-menu-option {
+  font: inherit;
+  cursor: pointer;
+}
+
+.folder-menu-option.is-active {
+  color: #fff;
+  background: var(--folder-accent);
+}
+
+.folder-menu-remove {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  color: #b3312c;
+  background: rgba(179, 49, 44, 0.1);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 2px;
+}
+
+.folder-menu-remove:hover {
+  background: rgba(179, 49, 44, 0.18);
+}
+
+.folder-menu-empty {
+  padding: 6px 8px;
+  color: var(--muted);
+}
+
+.folder-menu-new {
+  display: flex;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--card-border);
+}
+
+.folder-menu-new input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  font: inherit;
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+}
+
+.folder-menu-new button {
+  padding: 5px 9px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--folder-text);
+  background: var(--folder-soft);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.folder-menu-new button:hover {
+  background: var(--folder-soft-hover);
+}
+
+/* --- A folder's square, sitting on the board like anything else on it --- */
+.folder-zone {
+  position: absolute;
+  z-index: 1; /* above dimmed cards, below the members inside it */
+  /* Never intercepts a drag - drops are hit-tested against its geometry in
+     JS, which is what lets a dimmed card underneath it still be grabbed. */
+  pointer-events: none;
+  border: 2px solid var(--folder-zone-edge);
+  border-radius: 20px;
+  background: var(--folder-zone-fill);
+}
+
+/* Centred on the zone's top edge, in the same chip language as everything else
+   green - over the canvas ground rather than a card, so the tint composites
+   against --bg. Also the square's drag handle: the square itself takes no
+   pointer events, so that a card underneath it stays grabbable. */
+.folder-zone-label {
+  position: absolute;
+  top: -15px; /* keeps the taller chip straddling the square's top edge */
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--folder-text);
+  background: linear-gradient(var(--folder-soft), var(--folder-soft)), var(--bg);
+  border: 1px solid var(--folder-zone-edge);
+  padding: 5px 12px;
+  border-radius: 6px;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+}
+
+.folder-zone.dragging .folder-zone-label {
+  cursor: grabbing;
+}
+
+/* A re-flow should ease; a square being dragged should not - its members would
+   trail a third of a second behind the frame carrying them. */
+body.dragging-zone .card {
+  transition: none;
+}
+
+.card--foldered {
+  z-index: 2;
+}
+
+#empty-state {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 14px;
+}

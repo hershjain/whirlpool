@@ -28,6 +28,25 @@ sent to the same number.
 - **STOP** / **START**: opt out of and back into messages. Recognised as whole
   messages only, so "stop doing that" is still saved as a thought.
 
+## One app, four paths
+
+The landing page, the privacy policy, the login form and the canvas are all
+served by the same Express process out of `public/`:
+
+| Path | What |
+|---|---|
+| `/` | landing page |
+| `/privacy` | privacy policy |
+| `/login` | phone-code login |
+| `/app` | the canvas, behind a session |
+
+Keeping them on one origin is not only tidiness: the session cookie is set by
+the API, and a cookie set on one origin cannot be read from another without
+`SameSite=None`, which browsers are steadily switching off. One origin means
+every link is relative and works in every environment with no configuration.
+See `docs/site.md` for the routing rules and the two filenames that had to be
+renamed when the sites merged.
+
 ## Logging in to the canvas
 
 There is no password. `/login` takes a phone number, the server sends a
@@ -51,7 +70,7 @@ to boot in console mode under `NODE_ENV=production`, so the dev path cannot
 ship by accident.
 
 Before submitting an A2P campaign, note that the reasons it gets rejected are
-usually on the public site rather than in the code. `website/` now carries the
+usually on the public site rather than in the code. The landing page now carries the
 opt-in description, the "Msg & data rates may apply. Reply STOP to opt out,
 HELP for help" disclosure and a privacy policy for that reason. One thing to
 get right on the form: this number sends both a login code and conversational

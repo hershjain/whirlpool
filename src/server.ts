@@ -33,33 +33,54 @@ app.use("/webhook", webhookRouter);
 app.use("/auth", express.json(), authRouter);
 app.use("/api", express.json(), canvasRouter);
 
-// The canvas. Both spellings are handled, and both ahead of express.static:
-// the static handler serves whatever file matches the path, so /index.html
-// would walk straight around a gate mounted only on "/". `index: false` below
-// covers the directory-index case; this covers the explicit one.
+// One origin serves all three faces of the product: the landing page at "/",
+// the login form at "/login", and the canvas at "/app". They used to be two
+// deploys, which forced login onto the app's origin anyway - a cookie set by
+// the API cannot be read from another origin without SameSite=None, which
+// browsers are steadily switching off. Collapsing them means relative links
+// work everywhere with nothing to configure, and there is no second domain to
+// keep alive or forget to point at.
 //
-// The markup itself is not secret - every byte of data arrives over /api,
-// which is gated independently. This is so that a signed-out visitor lands on
-// the login page instead of an empty board that silently bounces them.
-async function serveCanvas(req: express.Request, res: express.Response): Promise<void> {
+// Every route below is declared ahead of express.static, because the static
+// handler answers whatever path matches a file on disk: "/app.html" would walk
+// straight around a gate mounted only on "/app".
+
+// The canvas. Its markup is not secret - every byte of data arrives over /api,
+// which is gated independently - but a signed-out visitor should land on the
+// login page rather than an empty board that silently bounces them.
+async function serveApp(req: express.Request, res: express.Response): Promise<void> {
   const session = await sessionFromToken(tokenFrom(req));
   if (!session) {
     res.redirect("/login");
     return;
   }
-  res.sendFile(path.join(publicDir, "index.html"));
+  res.sendFile(path.join(publicDir, "app.html"));
 }
 
-app.get("/", serveCanvas);
-app.get("/index.html", serveCanvas);
+app.get("/app", serveApp);
+app.get("/app.html", serveApp);
 
-app.get("/login", (_req, res) => {
+// Already signed in? The login form has nothing to offer - send them to their
+// board instead of making them prove who they are twice.
+app.get(["/login", "/login.html"], async (req, res) => {
+  const session = await sessionFromToken(tokenFrom(req));
+  if (session) {
+    res.redirect("/app");
+    return;
+  }
   res.sendFile(path.join(publicDir, "login.html"));
 });
 
-// The login page's own assets, and the canvas's. index: false stops a request
-// for "/" being answered from disk before the gate above ever runs.
-app.use(express.static(publicDir, { index: false }));
+// Tidy URL for the privacy policy; the .html spelling still resolves via the
+// static handler, so an existing link cannot break.
+app.get("/privacy", (_req, res) => {
+  res.sendFile(path.join(publicDir, "privacy.html"));
+});
+
+// The landing page and every shared asset. `index` is left at its default so
+// "/" serves index.html, which is now the public marketing page rather than
+// anything that needs a session.
+app.use(express.static(publicDir));
 
 const HOUR_MS = 60 * 60 * 1000;
 

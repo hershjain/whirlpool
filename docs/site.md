@@ -1,7 +1,34 @@
-# whirlpool — product website
+# whirlpool — the marketing pages
 
-Static marketing site for Whirlpool. Plain HTML/CSS/JS, no build step. Drop new
-pages and assets in this folder as they're designed.
+The landing page and privacy policy. Plain HTML/CSS/JS, no build step. They live
+in `public/` alongside the app and are served by the same Node process, so a new
+page is just a file dropped in there.
+
+## One origin
+
+The landing page, the login form and the canvas are all served by the Express
+app in `src/server.ts`:
+
+| Path | Serves | Gated |
+|---|---|---|
+| `/` | `public/index.html` — the landing page | no |
+| `/privacy` | `public/privacy.html` | no |
+| `/login` | `public/login.html` | no, but redirects to `/app` if already signed in |
+| `/app` | `public/app.html` — the canvas | yes, redirects to `/login` |
+
+These used to be two deploys, which is what forced login onto the app's origin
+in the first place: the session cookie is set by the API, and a cookie set on
+one origin cannot be read from another without `SameSite=None`, which browsers
+are steadily switching off. With one origin the problem does not arise, every
+link is relative, and there is no second domain to keep alive.
+
+**Route handlers must be declared before `express.static`.** The static handler
+answers any path matching a file on disk, so `/app.html` would walk straight
+around a gate mounted only on `/app`. Both spellings are handled for that reason.
+
+**Two filenames collided** when the sites merged, and the canvas lost: its
+`index.html` and `style.css` are now `app.html` and `app.css`, leaving the
+landing page holding the names you would expect at the root of a site.
 
 ## Files
 
@@ -19,22 +46,15 @@ pages and assets in this folder as they're designed.
   is capped at 440. If you swap the file, update the `<img>`'s `width`/`height`
   **attributes** to match: they're what reserves the box before it decodes.
 
-## Two placeholders to fill in before this goes live
+## The one placeholder left
 
-Both are in `index.html` and both are currently pointing at nothing real:
+`#sms-link` in `index.html` is `sms:+15550100?&body=...`. Replace the number
+with the real Twilio one. This link is the sign-up: there is no form anywhere in
+the product, the first text is what creates the account, so this is the top of
+the funnel. Keep the `?&body=` spelling — iOS wants the ampersand and Android
+tolerates it, while `?body=` alone fails on iOS.
 
-- `#sms-link` — `sms:+15550100?&body=...`. Replace with the actual Twilio
-  number. This link is the sign-up: there is no form anywhere in the product,
-  the first text is what creates the account, so this is the top of the funnel.
-  Keep the `?&body=` spelling — iOS wants the ampersand and Android tolerates
-  it, while `?body=` alone fails on iOS.
-- `#login-link` — `https://app.whirlpool.xyz/login`. Replace with wherever the
-  Node app is deployed.
-
-Login is **not** on this site. It is served by the app at `/login`, because the
-session cookie is set by that origin and a cookie set on one origin cannot be
-read by another without `SameSite=None`, which browsers are steadily switching
-off. This site links out to it.
+The login link needs nothing: it is `/login` on this same origin.
 
 ## Notes
 
@@ -120,6 +140,9 @@ rather than by screenshot, then confirm in a real browser.
 ## Local preview
 
 ```bash
-python3 -m http.server -d website 8080
-# then open http://localhost:8080
+npm run dev
+# then open http://localhost:3000
 ```
+
+There is no separate static server any more. The marketing pages need the Node
+app running, because they are served by it.

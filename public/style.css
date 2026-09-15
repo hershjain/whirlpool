@@ -1,741 +1,540 @@
 :root {
-  --bg: #f4f6fb;
-  --dot: #d7deec;
-  --card-bg: #ffffff;
-  --card-border: #e2e7f0;
-  --text: #1a2233;
-  --muted: #6b7386;
-  --accent: #1d5fd6;
-  --tag-bg: #eaf1fd;
-  --tag-text: #1d5fd6;
-  /* Header bar for a note, or a link whose source hasn't resolved yet -
-     everything else overrides these via --source-color/--source-text-color
-     set inline per card. */
-  --header-neutral: #e2e7f0;
-  --header-neutral-text: #4a5266;
-  /* Notes have no source to brand them - a legal-pad yellow marks them as
-     the user's own writing rather than something saved from a site. */
-  --note-color: #fbf3c4;
-  --note-text-color: #4a4326;
-  /* Folders are user-made collections, as against the model's tags/category -
-     green and rectangular, against the tags' pills, so the two never get
-     mistaken for one another. One translucent-green recipe serves the card
-     badge, the filter chips and the folder menu, so they read as one family. */
-  --folder-accent: #1f8b4c;
-  --folder-text: #17663a;
-  --folder-soft: rgba(31, 139, 76, 0.12);
-  --folder-soft-hover: rgba(31, 139, 76, 0.2);
-  /* The square on the board reads as a surface things sit on, so it carries
-     more weight than the chips do - the tile's own corner badge keeps the
-     lighter --folder-soft above. */
-  --folder-zone-fill: rgba(31, 139, 76, 0.3);
-  --folder-zone-edge: rgba(31, 139, 76, 0.45);
+  --teal: #00c3d0;
+  --cyan: #00c0e8;
+  --ink: #000000;
+  --paper: #ffffff;
+  --copy: clamp(0.85rem, 1.5vw, 1.05rem); /* body copy on the text screens */
+  --mono: 'Necto Mono', 'Space Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --edge: clamp(14px, 3.2vw, 36px); /* viewport margin for the logo + tagline */
 }
 
 * { box-sizing: border-box; }
 
+html {
+  scroll-behavior: smooth;
+  scroll-snap-type: y mandatory;
+}
+
 html, body {
   margin: 0;
-  height: 100%;
-  overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
 }
 
-#toolbar {
+body { overflow-x: hidden; }
+
+/* Each screen is exactly one viewport; the arrow moves you between them. */
+.screen {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--paper);
+  overflow: hidden;
+  scroll-snap-align: start;
+}
+
+/* Square field — the whirlpool, scaled from the 300-wide Figma frame to span the
+   whole page. Every measurement here comes from layout() in index.html as plain
+   pixels: an earlier version did the scaling in CSS with
+   `scale(calc(100vw / 300px))`, but length-divided-by-length is CSS Values 4, and
+   browsers that don't support it drop the whole transform and leave the squares
+   sitting unscaled in the corner. Keep the arithmetic in JS. */
+.squares {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  /* top and height are set by layout() */
+}
+
+.sq {
+  position: absolute;
+  background: var(--teal);
+  /* left, top, width and height are set by layout(); transform is driven
+     per-frame by the swirl */
+}
+
+.sq--cyan { background: var(--cyan); }
+
+/* Site chrome — logo left, actions right, fixed to the viewport so it rides all
+   four screens and carries onto login.html. Body-level for the same reason
+   .cursor is: #hero clips its overflow. */
+.chrome {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 48px;
+  z-index: 10;            /* over the page, under .cursor's 20 */
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 20px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--card-border);
-  z-index: 10;
-  user-select: none;
+  justify-content: space-between;
+  padding: var(--edge);   /* the same viewport margin the tagline and arrow use */
+  pointer-events: none;   /* the bar is invisible and full-width; it must not
+                             swallow clicks or hover on the hero beneath it */
 }
 
-#toolbar-title {
-  font-weight: 700;
-  font-size: 15px;
-}
+.chrome > * { pointer-events: auto; }
 
-#toolbar-hint {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-#filter-toggle {
-  margin-left: auto;
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  background: var(--tag-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-#filter-toggle:hover {
-  color: var(--text);
-}
-
-/* The account pair sits at the right end of the toolbar. #filter-toggle owns
-   the margin-left: auto that pushes this whole group over, so these two just
-   follow it rather than each claiming their own auto margin. */
-#toolbar-who {
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-#logout {
-  padding: 4px 10px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--muted);
-  background: var(--tag-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-#logout:hover {
-  color: var(--text);
-}
-
-#logout:disabled {
-  opacity: .5;
-  cursor: default;
-}
-
-/* The hint is the first thing worth dropping when the bar gets tight - the
-   account controls and the filter button are all actionable, and it is not. */
-@media (max-width: 720px) {
-  #toolbar-hint { display: none; }
-}
-
-/* Sits directly under the 48px toolbar, overlaying the canvas the same way. */
-#filter-bar {
-  position: fixed;
-  top: 48px;
-  left: 0;
-  right: 0;
-  z-index: 9;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(6px);
-  border-bottom: 1px solid var(--card-border);
-  user-select: none;
-}
-
-/* This file's own `display: flex` above always beats the browser's built-in
-   `[hidden] { display: none }` rule - author styles win over the user-agent
-   stylesheet regardless of specificity - so without this override the
-   Filters toggle's `hidden` attribute set nothing visible; the bar stayed
-   displayed however #filter-toggle set it. */
-#filter-bar[hidden] {
-  display: none;
-}
-
-/* Same visual language as .card-tag so the bar reads as native. */
-.filter-chip {
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--tag-text);
-  background: var(--tag-bg);
-  padding: 4px 9px;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.filter-chip:hover {
-  border-color: var(--accent);
-}
-
-.filter-chip.is-active {
-  color: #fff;
-  background: var(--accent);
-}
-
-.filter-chip--folder {
-  border-radius: 6px; /* rectangle, against the pill-shaped category/tag chips */
-  color: var(--folder-text);
-  background: var(--folder-soft);
-}
-
-.filter-chip--folder:hover {
-  background: var(--folder-soft-hover);
-  border-color: var(--folder-zone-edge);
-}
-
-.filter-chip--folder.is-active {
-  color: #fff;
-  background: var(--folder-accent);
-}
-
-.filter-count {
-  font-weight: 500;
-  opacity: 0.65;
-}
-
-.filter-divider {
-  width: 1px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--card-border);
-}
-
-#viewport {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  cursor: grab;
-  background-image: radial-gradient(var(--dot) 1.5px, transparent 1.5px);
-  background-size: 28px 28px;
-}
-
-#viewport.panning {
-  cursor: grabbing;
-}
-
-#world {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  transform-origin: 0 0;
-}
-
-.card {
-  position: absolute;
-  width: 240px; /* keep in sync with CARD_W in canvas.js */
-  background: var(--card-bg);
-  border-radius: 14px;
-  overflow: hidden; /* clips the header bar to the card's rounded corners */
-  /* No outline - the shadow alone separates the tile from the dotted canvas,
-     so it carries more weight than it did behind a border. */
-  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
-  cursor: grab;
-  user-select: none;
-}
-
-/* A cluster or ring re-flow settles rather than teleports. Excluded while
-   dragging so a live drag stays 1:1 with the cursor. */
-.card:not(.dragging) {
-  transition: left 0.28s ease, top 0.28s ease;
-}
-
-.card.dragging {
-  cursor: grabbing;
-  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
-  z-index: 5;
-}
-
-/* Floating zoom controls, bottom right - same translucent treatment as the
-   toolbar so they read as chrome rather than as content on the canvas. */
-#zoom-controls {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 10;
-  display: flex;
-  align-items: stretch;
-  overflow: hidden;
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 2px 8px rgba(20, 30, 60, 0.1);
-}
-
-#zoom-controls button {
-  min-width: 34px;
-  padding: 7px 4px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1;
-  color: var(--text);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-
-#zoom-controls button:hover {
-  background: var(--tag-bg);
-}
-
-#zoom-level {
-  min-width: 54px;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums; /* stops the width jittering while zooming */
-  color: var(--muted);
-  border-left: 1px solid var(--card-border);
-  border-right: 1px solid var(--card-border);
-}
-
-/* Inter in place of Chirp on tweet cards only - see index.html. */
-.card--tweet .card-excerpt,
-.card--tweet .card-byline {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  letter-spacing: -0.01em;
-}
-
-/* Logo, then the site's name, then the delete control - the order is
-   positional now, so there's no space-between to fight the name for room. */
-.card-header {
+.chrome__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--source-color, var(--header-neutral));
-  color: var(--source-text-color, var(--header-neutral-text));
+  gap: .6em;
 }
 
-.card-source-name {
-  /* Takes the slack between the logo and the X, and gives it back by
-     ellipsising rather than by pushing the X off the end of the bar. */
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Inherits the header's per-source text colour, so it stays legible on a dark
-   brand bar and a light one alike without a colour of its own. Muted until
-   hovered - it's destructive, and shouldn't be the loudest thing on the tile. */
-.card-delete {
-  flex-shrink: 0;
-  margin-left: auto; /* stays hard right even on a card with no logo */
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  font: inherit;
-  font-size: 11px;
-  line-height: 1;
+/* Logo — omnipresent, and a link home from every page. */
+.wordmark {
   color: inherit;
+  text-decoration: none;
+  font-size: clamp(0.85rem, 2.2vw, 1.9rem);
+  line-height: 1;
+}
+
+/* Chrome buttons. The site is otherwise borderless and hard-edged, so these
+   introduce its only radius: 6px, matching the rectangle convention the app in
+   ../public uses (999px there is reserved for pills). */
+.btn {
+  padding: .5em .9em;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
   background: none;
-  border: none;
-  border-radius: 4px;
-  opacity: 0.55;
-  cursor: pointer;
+  color: var(--ink);
+  text-decoration: none;
+  font-family: var(--mono);
+  font-size: clamp(0.75rem, 1.6vw, 1rem);
+  line-height: 1;
+  white-space: nowrap;    /* labels must not wrap at narrow widths */
+  transition: background-color .25s ease, border-color .25s ease, color .25s ease,
+              opacity .35s ease;
 }
 
-.card-delete:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.18);
+/* Hover fills with the lighter square blue. Black text, not white — the fill is
+   light and the site is ink-on-paper throughout. :focus-visible rides along so
+   the state is reachable from the keyboard, not mouse-only. */
+.btn:hover,
+.btn:focus-visible {
+  background: var(--cyan);
+  color: var(--ink);
+  border-color: transparent;  /* the fill carries the state; transparent rather
+                                 than border:0 so the box doesn't resize */
 }
 
-/* Takes over the bar in place of the name and the X while a tile is mid-
-   decision - same row, same colours, no dialog. */
-.card-delete-confirm {
-  display: none;
+/* Screens that carry text rather than artwork: centred on both axes. */
+.screen--text {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-.card--confirming .card-source-name,
-.card--confirming .card-delete {
-  display: none;
-}
-
-.card--confirming .card-delete-confirm {
-  display: flex;
-}
-
-.card-delete-ask {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.card-delete-confirm button {
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  padding: 2px 7px;
-  line-height: 1;
-  color: inherit;
-  background: rgba(255, 255, 255, 0.18);
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.card-delete-confirm button:hover {
-  background: rgba(255, 255, 255, 0.32);
-}
-
-/* Bottom-right corner of the tile, not the header bar - filing something is a
-   thing you do to the whole card, and the header now belongs to the source and
-   the delete control. .card is positioned, so this anchors to the tile. */
-.card-folder {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 3;
-  font: inherit;
-  font-size: 11px; /* matches .card-tag */
-  font-weight: 600;
-  padding: 3px 8px; /* matches .card-tag */
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--folder-text);
-  /* Plainly translucent now that it sits on the card body rather than a
-     per-source brand bar - the backdrop is known, so the tint no longer has to
-     be composited over an opaque base to stay legible. */
-  background: var(--folder-soft);
-  border: none;
-  border-radius: 7px; /* rectangle, against the tag pill's 999px */
-  cursor: pointer;
-}
-
-.card-folder:hover {
-  background: var(--folder-soft-hover);
-}
-
-/* An unfiled tile gets a "+" in a rounded square instead of a word. Grid
-   centring puts the glyph on the box's centre in both axes, which inline-flex
-   with a 14px glyph never quite managed. */
-.card-folder--empty {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  max-width: none;
-  display: grid;
-  place-items: center;
-  font-size: 15px;
-  line-height: 1;
-}
-
-.card-logo {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  object-fit: cover;
-  -webkit-user-drag: none;
-  user-drag: none;
-}
-
-/* Flush to the card's edges - .card's overflow:hidden clips it to the
-   rounded corners. Fixed height so a wall of cards stays on a grid whatever
-   aspect ratio each og:image happens to be. */
-.card-hero {
-  display: block;
-  width: 100%;
-  height: 132px;
-  object-fit: cover;
-  background: var(--bg);
-  /* Without this the browser's native image drag lifts the picture off the
-     tile; the card's own pointer drag never gets the gesture. */
-  -webkit-user-drag: none;
-  user-drag: none;
-}
-
-/* Posts, reels and image blocks are the image - give it room. Articles keep
-   the shorter .card-hero band above their summary. */
-.card-hero--tall {
-  height: 240px;
-}
-
-.card-body {
-  /* Extra room at the foot so the corner folder control never lands on the
-     last line of text or the tag row. */
-  padding: 14px 16px 36px;
-}
-
-.card-title {
-  font-weight: 600;
-  font-size: 14px;
-  line-height: 1.35;
-  margin: 0 0 2px;
-  overflow-wrap: anywhere;
-}
-
-.card-byline {
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0 0 10px;
-  overflow-wrap: anywhere;
-}
-
-/* Attribution beneath a post's own words, rather than above a headline. */
-.card-byline--under {
-  margin: 8px 0 10px;
-}
-
-/* The item's own words. The rule down the left marks it as quoted material -
-   what the tweet or caption actually says - as against the summary below,
-   which is written *about* the item and stays flush and grey. */
-.card-excerpt {
-  font-size: 13.5px;
-  color: var(--text);
-  line-height: 1.45;
-  margin: 0 0 10px;
-  padding-left: 10px;
-  border-left: 2px solid var(--card-border);
-  overflow-wrap: anywhere;
-  white-space: pre-line; /* captions carry their own line breaks */
-  display: -webkit-box;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* A note is the user's own writing - nothing to distinguish it from, so no
-   rule and no indent. */
-.card-excerpt--plain {
-  padding-left: 0;
-  border-left: none;
-}
-
-.card-summary {
-  font-size: 12.5px;
-  color: var(--muted);
-  line-height: 1.45;
-  margin: 0 0 10px;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 5;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* Expanded: drop the clamps and lift the tile over its neighbours. Cards are
-   absolutely positioned, so growing one moves nothing else. */
-.card--expanded {
-  z-index: 6;
-}
-
-.card--expanded .card-excerpt,
-.card--expanded .card-summary {
-  display: block;
-  -webkit-line-clamp: none;
-  overflow: visible;
-}
-
-.card-expand {
-  display: block;
-  width: fit-content;
-  margin: -4px 0 10px auto; /* auto left margin pushes it to the card's right edge */
-  padding: 1px 8px 3px;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  background: var(--tag-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.card-expand:hover {
-  color: var(--text);
-}
-
-.card--broken .card-hero {
-  opacity: 0.45;
-  filter: grayscale(1);
-}
-
-.card-broken {
-  display: inline-block;
-  margin: 0 0 8px;
-  padding: 2px 7px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #8a2b2b;
-  background: #fdecec;
-  border-radius: 4px;
-}
-
-.card-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.card-tag {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--tag-text);
-  background: var(--tag-bg);
-  padding: 3px 8px;
-  border-radius: 999px;
-}
-
-/* --- Folder menu: a single floating popover, positioned per use --- */
-#folder-menu {
-  position: fixed;
-  z-index: 20;
-  min-width: 200px;
-  max-width: 260px;
-  padding: 8px;
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(20, 30, 60, 0.18);
-  font-size: 13px;
-}
-
-/* Options render as the same chip as .filter-chip--folder (wrapping into a
-   row rather than a column of full-width rows) so picking a folder here looks
-   like picking one in the filter bar. */
-.folder-menu-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-height: 160px;
-  overflow-y: auto;
-  margin-bottom: 6px;
-}
-
-.folder-menu-option {
-  font: inherit;
-  cursor: pointer;
-}
-
-.folder-menu-option.is-active {
-  color: #fff;
-  background: var(--folder-accent);
-}
-
-.folder-menu-remove {
-  display: block;
-  width: 100%;
-  padding: 5px 8px;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  justify-content: center;
+  gap: 1.4em;
+  padding: var(--edge);
   text-align: center;
-  color: #b3312c;
-  background: rgba(179, 49, 44, 0.1);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-top: 2px;
 }
 
-.folder-menu-remove:hover {
-  background: rgba(179, 49, 44, 0.18);
+/* Same scale as the hero headline, so the page reads as one voice. */
+.screen__title {
+  margin: 0;
+  font-weight: 400;
+  font-size: min(5.2vw, 8vh);
+  line-height: 1.25;
 }
 
-.folder-menu-empty {
-  padding: 6px 8px;
-  color: var(--muted);
+/* Content screens carry real copy, so give them a safety valve: .screen is a
+   fixed 100dvh with overflow: hidden, which was fine when each held one heading.
+   A short or landscape viewport must not silently clip a paragraph. */
+.screen--text { overflow-y: auto; }
+
+/* --- why ------------------------------------------------------------------
+   Laid out from a 300x200 Figma frame. The frame's font sizes are frame units,
+   not pixels — scaling them literally would give ~48px body copy — so the frame
+   is read for hierarchy and expressed in the site's clamp() idiom. Widths do
+   carry over: the copy block is 183 of 300 and the art 89, which is why they sit
+   side by side. */
+.why__lead {
+  margin: 0;
+  max-width: 30ch;      /* wider than the frame's 93-of-300 block, because the
+                           type is now heading-sized and needs the measure */
+  font-size: clamp(1.4rem, 3.4vw, 2.75rem);  /* ~44px at 1440 */
+  font-weight: 400;
+  line-height: 1.25;    /* heading leading, not the body's 1.45 */
 }
 
-.folder-menu-new {
+.why__row {
   display: flex;
-  gap: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--card-border);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 2em;
 }
 
-.folder-menu-new input {
-  flex: 1;
-  min-width: 0;
-  padding: 5px 7px;
-  font: inherit;
-  border: 1px solid var(--card-border);
-  border-radius: 6px;
+.why__copy {
+  flex: 1 1 22em;
+  max-width: 46ch;
+  text-align: left;
 }
 
-.folder-menu-new button {
-  padding: 5px 9px;
-  font: inherit;
-  font-weight: 600;
-  color: var(--folder-text);
-  background: var(--folder-soft);
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
+.why__copy p {
+  margin: 0;
+  /* The frame sets this a step below the lead (8 against 10); keep that gap. */
+  font-size: calc(var(--copy) * 0.92);
+  line-height: 1.55;
 }
 
-.folder-menu-new button:hover {
-  background: var(--folder-soft-hover);
+/* A real heading, but well under .screen__title: it anchors the column rather
+   than competing with the screen titles on either side of this one. */
+.why__title {
+  margin: 0 0 .6em;
+  font-weight: 400;
+  font-size: clamp(1.1rem, 2.4vw, 1.8rem);
+  line-height: 1.2;
 }
 
-/* --- A folder's square, sitting on the board like anything else on it --- */
-.folder-zone {
+/* The ratio comes from the img's width/height ATTRIBUTES, not aspect-ratio —
+   attributes are how browsers have always derived intrinsic ratio, and newer CSS
+   has been dropped silently by this user's browser before. The file is 518x400,
+   so the 440 cap renders at ~1.2x native at its widest and ~1.5x at its usual
+   size; pixelated stops a smooth upscale from muddying the dither.
+
+   flex: 0 0 auto, not 0 1 auto — while it could shrink, the stated width was
+   overridden by the row's own sizing and 30% came out as 198px. */
+.why__art {
+  flex: 0 0 auto;
+  width: 37%;   /* measured: yields ~340px on a desktop viewport */
+  min-width: 220px;
+  max-width: 440px;
+  height: auto;
+  border-radius: 8px;
+  image-rendering: pixelated;
+}
+
+/* Flex basis alone kept these side by side down to ~400px, which is too tight
+   for a 46ch column next to the art. Stack them explicitly instead. */
+@media (max-width: 720px) {
+  .why__row {
+    flex-direction: column;
+    flex-wrap: nowrap;  /* with direction: column, `wrap` breaks into a second
+                           column and undoes the stacking entirely */
+  }
+
+  /* .why__copy's `flex: 1 1 22em` is a width hint for the row layout. In a
+     column, flex-basis is the HEIGHT, so it was pinning this block to a flat
+     352px whatever the copy actually needed. Let it size to its content. */
+  .why__copy { flex: 0 0 auto; }
+  .why__art { width: 55%; min-width: 0; max-width: 320px; }
+}
+
+/* Short viewports — landscape phones — are height-starved, and this screen has
+   the most to fit. Tighten the rhythm rather than let it clip. */
+@media (max-height: 560px) {
+  .screen--text { gap: .8em; }
+  .why__row { gap: 1.2em; }
+  .why__art { max-width: 260px; }
+  .why__title { margin-bottom: .3em; }
+}
+
+/* Narrow phones. A 300-character paragraph at 320px wide runs to ~352px of
+   text on its own, and the screen overflowed by 51px. Reclaim it from the
+   rhythm rather than from the content: tighter gaps, tighter leading, slightly
+   smaller art. 375x667 previously fit by exactly 0px, so this buys it headroom
+   too. */
+@media (max-width: 420px) {
+  .screen--text { gap: .8em; }
+  .why__row { gap: 1.2em; }
+  .why__title { margin-bottom: .3em; }
+  .why__copy p { line-height: 1.45; }
+  .why__art { width: 48%; }
+}
+
+/* --- join now -------------------------------------------------------------
+   The frame runs the steps together as one block of text. Breaking them into a
+   real list is the point of the ask; counters keep the user's (1) (2) (3). */
+.steps {
+  counter-reset: step;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 64ch;
+  text-align: left;
+  font-size: var(--copy);
+  line-height: 1.5;
+}
+
+.steps li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: 2.8em 1fr;
+  gap: .3em;
+}
+
+.steps li + li { margin-top: .85em; }
+
+.steps li::before { content: "(" counter(step) ")"; }
+
+/* The only inline link in the copy, and it is the one that starts the whole
+   product, so it is underlined rather than left to the cursor to reveal. */
+.steps__link {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.steps__link:hover,
+.steps__link:focus-visible {
+  background: var(--cyan);
+}
+
+/* Carrier disclosure under the login button. Small and grey: it is required
+   on the page, not part of the pitch. */
+.fineprint {
+  margin: 0;
+  max-width: 48ch;
+  font-size: clamp(0.62rem, 1.1vw, 0.72rem);
+  line-height: 1.6;
+  opacity: .6;
+  text-align: center;
+}
+
+.fineprint a { color: inherit; }
+
+/* A page that is deliberately blank still has to fill the viewport in white. */
+.page {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Headline — centred in the page, both axes. */
+.headline {
   position: absolute;
-  z-index: 1; /* above dimmed cards, below the members inside it */
-  /* Never intercepts a drag - drops are hit-tested against its geometry in
-     JS, which is what lets a dimmed card underneath it still be grabbed. */
-  pointer-events: none;
-  border: 2px solid var(--folder-zone-edge);
-  border-radius: 20px;
-  background: var(--folder-zone-fill);
-}
-
-/* Centred on the zone's top edge, in the same chip language as everything else
-   green - over the canvas ground rather than a card, so the tint composites
-   against --bg. Also the square's drag handle: the square itself takes no
-   pointer events, so that a card underneath it stays grabbable. */
-.folder-zone-label {
-  position: absolute;
-  top: -15px; /* keeps the taller chip straddling the square's top edge */
   left: 50%;
-  transform: translateX(-50%);
-  white-space: nowrap;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--folder-text);
-  background: linear-gradient(var(--folder-soft), var(--folder-soft)), var(--bg);
-  border: 1px solid var(--folder-zone-edge);
-  padding: 5px 12px;
-  border-radius: 6px;
-  pointer-events: auto;
-  cursor: grab;
-  user-select: none;
-}
-
-.folder-zone.dragging .folder-zone-label {
-  cursor: grabbing;
-}
-
-/* A re-flow should ease; a square being dragged should not - its members would
-   trail a third of a second behind the frame carrying them. */
-body.dragging-zone .card {
-  transition: none;
-}
-
-.card--foldered {
-  z-index: 2;
-}
-
-#empty-state {
-  position: fixed;
   top: 50%;
-  left: 50%;
   transform: translate(-50%, -50%);
-  color: var(--muted);
-  font-size: 14px;
+  z-index: 2;
+  margin: 0;
+  width: min(92vw, 12em);
+  text-align: center;
+  font-weight: 400;
+  font-size: min(5.2vw, 8vh);
+  line-height: 1.25;
+}
+
+/* Typewriter. Both lines' height is reserved up front so the headline never
+   shifts as characters come and go; the caret trails the last one typed. */
+.type {
+  display: block;
+  white-space: pre-wrap; /* renders the \A in TYPE_TEXT as the line break */
+  min-height: 2.5em;     /* 2 lines x 1.25 line-height */
+}
+
+.type::after {
+  content: '';
+  display: inline-block;
+  width: 0.6em;
+  height: 1em;
+  margin-left: 0.06em;
+  vertical-align: -0.12em;
+  background: var(--ink);
+  animation: caret-blink 1s steps(1, end) infinite;
+}
+
+@keyframes caret-blink {
+  0%, 50%      { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* The animated text is aria-hidden, so carry the real headline for screen
+   readers here. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Tagline — one word per line, stacked directly, bottom-left of the page. */
+.tagline {
+  position: absolute;
+  left: var(--edge);
+  bottom: var(--edge);
+  z-index: 3;
+  margin: 0;
+  font-size: clamp(0.8rem, 2.1vw, 1.4rem);
+  line-height: 1.35;
+}
+
+.tagline span { display: block; }
+
+/* Arrow — a rotated -> that points down, bobs, and is a real click target.
+   Fixed rather than pinned inside #hero: it rides every screen so there's
+   always a cue that more is below, and it hides itself on the last one.
+
+   The glyph is a separate span so the bob and the click nudge can own a
+   transform without fighting the button's opacity. The button's reveal uses
+   `backwards` fill, not `both`: backwards covers the pre-delay period, then
+   hands opacity back to the declared value, which is what lets .is-hidden
+   transition it away later. `both` would hold opacity forever and win. */
+.arrow {
+  position: fixed;
+  right: var(--edge);
+  bottom: var(--edge);
+  z-index: 10;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: clamp(1.4rem, 3.5vw, 2.6rem);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 1;
+  transition: opacity .35s ease;
+  animation: fade-in .55s ease .75s backwards;
+}
+
+.arrow__glyph {
+  display: inline-block;
+  /* Rotated 90deg, the arrow's local +X points down the screen. */
+  transform: rotate(90deg);
+  animation: arrow-bob 1.4s ease-in-out infinite;
+}
+
+@keyframes arrow-bob {
+  0%, 100% { transform: rotate(90deg) translateX(0); }
+  50%      { transform: rotate(90deg) translateX(6px); }
+}
+
+/* Click: a nudge in the direction of travel, then back. It replaces the bob
+   for its duration rather than layering on it — both drive transform. */
+.arrow--nudge .arrow__glyph {
+  animation: arrow-nudge .45s ease-out;
+}
+
+@keyframes arrow-nudge {
+  0%, 100% { transform: rotate(90deg) translateX(0); }
+  45%      { transform: rotate(90deg) translateX(20px); }
+}
+
+/* Nothing below: the cue would be a lie. Also used for "learn more" once you
+   leave the hero. */
+.arrow.is-hidden,
+.chrome__actions .btn.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Custom cursor. A real cursor can't be animated — cursor: url() takes a static
+   image only — so the native one is switched off site-wide and this trails the
+   pointer instead. Fixed, and a body-level child, so #hero's overflow:hidden
+   can't clip it and it carries onto the second screen. Never a hit target. */
+.cursor {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 20;
+  display: none;
+  pointer-events: none;
+}
+
+/* Set by main.js on the first real mousemove, so a touch-only device is never
+   left without a cursor. The `*` is needed because .arrow sets cursor: pointer
+   and would otherwise win over a bare html rule. */
+.has-cursor,
+.has-cursor * { cursor: none; }
+
+.cursor__dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--ink);
+  /* size and transform are set per-frame */
+}
+
+/* Load-in reveal: each element fades up in turn — wordmark, tagline, arrow,
+   headline. `both` fill holds them at opacity 0 before their delay, so there's
+   no flash of fully-styled text on a slow load.
+
+   .arrow and .headline animate opacity ONLY: both already own a transform
+   (rotate(90deg) and translate(-50%,-50%)), which a translateY here would
+   clobber. They get their motion from the bob and the typewriter instead. */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.wordmark { animation: rise-in .55s ease .15s both; }
+.chrome__actions .btn { animation: rise-in .55s ease .28s backwards; }
+.tagline  { animation: rise-in .55s ease .45s both; }
+/* .arrow's fade is declared with its bob, above. */
+.headline { animation: fade-in .55s ease 1.05s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .arrow,
+  .arrow__glyph,
+  .arrow--nudge .arrow__glyph { animation: none; }
+  .type::after { animation: none; opacity: 0; }
+  .cursor { display: none !important; }
+  .wordmark,
+  .tagline,
+  .btn,
+  .headline { animation: none; opacity: 1; }
+}
+
+/* ------------------------------------------------------------- doc pages */
+
+/* Privacy and anything else that is a page of prose rather than a screen.
+   Nothing is needed to disable the landing page's scroll snapping here:
+   `scroll-snap-type` on html only does anything when the page contains
+   elements with `scroll-snap-align`, and only `.screen` carries that. Doing
+   it with `html:has(.doc-page)` would be the obvious move and is exactly the
+   kind of newer selector this project avoids. */
+.doc {
+  max-width: 68ch;
+  margin: 0 auto;
+  padding-inline: var(--edge);
+  padding-block: calc(var(--edge) * 4) calc(var(--edge) * 3);
+  font-size: var(--copy);
+  line-height: 1.65;
+}
+
+.doc h1 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  letter-spacing: -0.02em;
+  margin: 0 0 .2em;
+}
+
+.doc h2 {
+  font-size: clamp(1rem, 2.2vw, 1.2rem);
+  margin: 2em 0 .5em;
+}
+
+.doc__meta {
+  margin: 0 0 2em;
+  opacity: .55;
+  font-size: .8em;
+}
+
+.doc ul {
+  padding-left: 1.2em;
+}
+
+.doc li + li { margin-top: .5em; }
+
+.doc a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.doc__back {
+  margin-top: 3em;
+  opacity: .6;
 }

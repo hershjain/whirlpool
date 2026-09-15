@@ -18,10 +18,9 @@ const resendBtn = document.getElementById("resend");
 const changeNumberBtn = document.getElementById("change-number");
 const errorEl = document.getElementById("error");
 
-// Where the marketing site's "how to start" copy lives. Same-origin default so
-// a local checkout with no marketing deploy still has a working link.
-const JOIN_URL = "https://whirlpool.xyz/#join";
-document.getElementById("join-link").href = JOIN_URL;
+// The landing page's join steps. Same origin as this page now, so it is a
+// plain relative link that works in every environment without configuration.
+document.getElementById("join-link").href = "/#join";
 
 const RESEND_SECONDS = 60;
 
@@ -138,7 +137,7 @@ codeStep.addEventListener("submit", async (e) => {
   if (res.status === 204) {
     // Replace, not assign: the login page should not sit in history behind
     // the canvas, where Back would land on a form that no longer applies.
-    window.location.replace("/");
+    window.location.replace("/app");
     return;
   }
 
