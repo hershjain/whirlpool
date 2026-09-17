@@ -168,6 +168,18 @@ function bounceToLogin() {
   return new Promise(() => {});
 }
 
+// Shared by every write. A 401 means the session went away while the tab was
+// open, and the honest response is the same one reads give - go to /login -
+// rather than letting the board look like it is still working.
+async function apiWrite(url, options) {
+  const res = await fetch(url, { credentials: "same-origin", ...options });
+  if (res.status === 401) {
+    await bounceToLogin();
+    return null;
+  }
+  return res;
+}
+
 async function getJson(url) {
   const res = await fetch(url, { credentials: "same-origin" });
   if (res.status === 401) return bounceToLogin();
@@ -192,15 +204,24 @@ async function loadItems() {
 
   // Anything without a saved position yet gets one now, oldest-first, and we
   // persist it immediately so it doesn't reshuffle on a later reload.
+  const placed = items.filter((item) => item.canvasX !== null && item.canvasY !== null);
   const unplaced = items
     .filter((item) => item.canvasX === null || item.canvasY === null)
     .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
+  // New arrivals start a block clear of the board rather than at the origin.
+  // This grid used to be anchored at (0, 0) and indexed within the unplaced
+  // list alone, which is where the cards already on the board were dealt from -
+  // so the first item saved after a board had been arranged came down on top of
+  // whatever held the first slot. A board with nothing placed still starts at
+  // (0, 0), so a first-ever load lays out exactly as it always did.
+  const origin = unplaced.length ? firstClearSpot(placed) : { x: 0, y: 0 };
+
   unplaced.forEach((item, index) => {
     const col = index % GRID_COLS;
     const row = Math.floor(index / GRID_COLS);
-    item.canvasX = col * (CARD_W + CARD_GAP);
-    item.canvasY = row * CARD_ROW_HEIGHT;
+    item.canvasX = origin.x + col * (CARD_W + CARD_GAP);
+    item.canvasY = origin.y + row * CARD_ROW_HEIGHT;
     savePosition(item.id, item.canvasX, item.canvasY);
   });
 
@@ -460,9 +481,20 @@ function layoutFolder(folder) {
   );
 }
 
-// Somewhere a square can open without covering anything: to the right of
-// everything already placed, lined up with the top of it.
-function firstClearSpot() {
+// Somewhere clear of everything already on the board: to the right of the
+// rightmost edge, lined up with the top of it. Serves a folder's square on its
+// first open, and a newly saved item's first position.
+//
+// Right rather than down, and that asymmetry is the whole point: every card is
+// exactly CARD_W wide, so its right edge is known from its x alone, while its
+// bottom edge is not - heights run from about 180px for a bare note to 500 for
+// a tall photo post and can only be had by measuring a card that is already in
+// the document. Going right needs no guess about height at all.
+//
+// `placed` defaults to the cards on the board, which is what the folder call
+// site wants. loadItems passes its own list instead, because it places new
+// items before any card has been built.
+function firstClearSpot(placed = [...cards.values()].map((entry) => entry.item)) {
   let right = 0;
   let top = 0;
   let seen = false;
@@ -473,8 +505,12 @@ function firstClearSpot() {
     seen = true;
   };
 
-  for (const entry of cards.values()) {
-    consider((entry.item.canvasX ?? 0) + CARD_W, entry.item.canvasY ?? 0);
+  for (const item of placed) {
+    // An item with no position yet is not on the board and cannot be cleared -
+    // reading it as (0, 0), as this used to, would anchor the spot to a card
+    // that is not there.
+    if (item.canvasX === null || item.canvasY === null) continue;
+    consider(item.canvasX + CARD_W, item.canvasY);
   }
   for (const zone of folderZoneRects.values()) consider(zone.right, zone.top);
 
@@ -645,7 +681,12 @@ if (filterToggle && filterBar) {
   });
 }
 
-function renderCard(item, source) {
+// The look of a tile with nothing wired to it. Split out from renderCard so the
+// tour can put an example card on screen that is the real component - same
+// header, same tags, same corner controls, and it can never drift from what a
+// real tile looks like - without any of the handlers, which would otherwise
+// talk to the API about an item that does not exist.
+function buildCardElement(item, source) {
   const card = document.createElement("div");
   // Tweets get Inter (standing in for Chirp) on their text; nothing else does.
   const isTweet = item.sourceHostname === "x.com" || item.sourceHostname === "twitter.com";
@@ -695,14 +736,28 @@ function renderCard(item, source) {
   if (item.imageUrl) {
     // For a post, a reel or an are.na block the image *is* the content, so it
     // gets room to be looked at; an article's image is decoration above the
-    // summary and keeps the shorter band.
-    const heroClass = item.isLongForm ? "card-hero" : "card-hero card-hero--tall";
+    // summary and keeps the shorter band. A video thumbnail and a map are both
+    // drawn at a known aspect ratio that already suits that shorter band - a
+    // 240px-wide 16:9 frame is 135px tall, and a map is rendered at 240x132.
+    const wantsTallHero = !item.isLongForm && !item.isVideo && !item.isPlace;
+    const heroClass = wantsTallHero ? "card-hero card-hero--tall" : "card-hero";
     // Sits flush between the header bar and the body so it reads as part of
     // the card rather than an inset thumbnail. Some hosts block hotlinking,
     // so drop the image rather than leave a broken-image box behind.
     // draggable="false" so dragging from the image moves the tile instead of
     // peeling the picture off it as a native HTML5 drag.
-    html += `<img class="${heroClass}" src="${escapeHtml(item.imageUrl)}" alt="" draggable="false" onerror="this.remove()" />`;
+    const hero = `<img class="${heroClass}" src="${escapeHtml(item.imageUrl)}" alt="" draggable="false"`;
+    if (item.isVideo) {
+      // Wrapped so the play glyph has something to sit over. The wrapper is
+      // what the onerror removes, so a thumbnail that fails to load doesn't
+      // leave a badge floating on its own above the title.
+      html += `<div class="card-hero-wrap">`;
+      html += `${hero} onerror="this.closest('.card-hero-wrap').remove()" />`;
+      html += `<span class="card-play" aria-hidden="true"></span>`;
+      html += `</div>`;
+    } else {
+      html += `${hero} onerror="this.remove()" />`;
+    }
   }
 
   html += `<div class="card-body">`;
@@ -726,8 +781,11 @@ function renderCard(item, source) {
   // hierarchy upside down. Articles and notes are the other way round: the
   // headline leads and a summary explains it.
   // A song never leads with its own text - the name is the point and the
-  // artist belongs directly under it, which is the title branch below.
-  const leadsWithContent = Boolean(item.excerpt) && !item.isLongForm && !item.isMusic;
+  // artist belongs directly under it, which is the title branch below. A place
+  // is the same: its excerpt is the street address, and a card that led with
+  // the address and demoted the name of the place has it backwards.
+  const leadsWithContent =
+    Boolean(item.excerpt) && !item.isLongForm && !item.isMusic && !item.isPlace;
 
   if (leadsWithContent) {
     // A note is the user's own writing, not a quotation from somewhere else,
@@ -763,7 +821,11 @@ function renderCard(item, source) {
   html += folderButtonMarkup(item);
 
   card.innerHTML = html;
+  return card;
+}
 
+function renderCard(item, source) {
+  const card = buildCardElement(item, source);
   wireFolderButton(card, item);
   wireDeleteButton(card, item);
   attachCardDrag(card, item);
@@ -808,8 +870,8 @@ function cancelDeleteConfirms(target = null) {
 
 async function deleteItem(item) {
   try {
-    const res = await fetch(`/api/items/${item.id}`, { method: "DELETE" });
-    if (!res.ok) return;
+    const res = await apiWrite(`/api/items/${item.id}`, { method: "DELETE" });
+    if (!res || !res.ok) return;
   } catch (error) {
     console.error("Failed to delete item", error);
     return;
@@ -973,12 +1035,12 @@ function openFolderMenu(anchorEl, item) {
 // immediately, and keeps the filter bar's folder chips/counts in sync.
 async function fileItemInFolder(item, folderId) {
   try {
-    const res = await fetch(`/api/items/${item.id}/folder`, {
+    const res = await apiWrite(`/api/items/${item.id}/folder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ folderId }),
     });
-    if (!res.ok) return;
+    if (!res || !res.ok) return;
   } catch (error) {
     console.error("Failed to update item folder", error);
     return;
@@ -997,12 +1059,12 @@ async function fileItemInFolder(item, folderId) {
 async function createFolderAndFile(item, name) {
   let folder;
   try {
-    const res = await fetch("/api/folders", {
+    const res = await apiWrite("/api/folders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
-    if (!res.ok) return;
+    if (!res || !res.ok) return;
     folder = await res.json();
   } catch (error) {
     console.error("Failed to create folder", error);
@@ -1068,9 +1130,12 @@ function attachCardExpander(card) {
 }
 
 function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // --- Dragging a card, distinguishing a drag from a click-to-open ---
@@ -1174,10 +1239,12 @@ function commitPosition(item, x, y) {
 
 // A folder's square sits where it was put, the same way a card does. Fire and
 // forget like savePosition - the in-memory folder is already updated, so a
-// failed write only costs the placement on the next reload.
+// failed write only costs the placement on the next reload. That reasoning
+// holds for a dropped connection; an expired session is not a blip, and
+// apiWrite redirects on 401 rather than letting every subsequent drag vanish.
 async function saveFolderPosition(id, x, y) {
   try {
-    await fetch(`/api/folders/${id}/position`, {
+    await apiWrite(`/api/folders/${id}/position`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ x, y }),
@@ -1189,7 +1256,7 @@ async function saveFolderPosition(id, x, y) {
 
 async function savePosition(id, x, y) {
   try {
-    await fetch(`/api/items/${id}/position`, {
+    await apiWrite(`/api/items/${id}/position`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ x, y }),

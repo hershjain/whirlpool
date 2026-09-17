@@ -1,6 +1,11 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
-import { fetchWithTimeout, BROWSER_PAGE_HEADERS, CRAWLER_PAGE_HEADERS } from "./httpFetch.js";
+import { fetchWithTimeout, BROWSER_PAGE_HEADERS, CRAWLER_PAGE_HEADERS, OSM_HEADERS } from "./httpFetch.js";
+import { assertSafeUrl } from "./safeFetch.js";
+
+// An oEmbed response is a short JSON document - a title, a byline, a thumbnail
+// URL. The 2MB page default is the wrong shape for these.
+const MAX_OEMBED_BYTES = 256 * 1024;
 
 export type ContentFidelity = "full_text" | "metadata_only" | "failed";
 
@@ -80,6 +85,191 @@ export function isMusicUrl(rawUrl: string): boolean {
   }
 }
 
+function bareHostname(url: URL): string {
+  const lower = url.hostname.toLowerCase();
+  return lower.startsWith("www.") ? lower.slice(4) : lower;
+}
+
+// --- YouTube ---------------------------------------------------------------
+
+// music.youtube.com is deliberately excluded: it is in MUSIC_HOSTNAMES, and a
+// song there is a song rather than a video. extractFromUrl checks music first
+// for the same reason, but the card's `isVideo` is derived from this predicate
+// on its own, so the exclusion has to live here too.
+const YOUTUBE_HOSTNAMES = ["youtube.com", "youtu.be", "youtube-nocookie.com"];
+
+// Eleven characters of the URL-safe alphabet - every YouTube id, and a cheap
+// way to reject a path segment that merely sits where an id would.
+const YOUTUBE_ID = /^[\w-]{11}$/;
+
+function isYouTubeUrl(url: URL): boolean {
+  const host = bareHostname(url);
+  if (host === "music.youtube.com") return false;
+  return YOUTUBE_HOSTNAMES.some((known) => host === known || host.endsWith(`.${known}`));
+}
+
+// The id sits somewhere different in each of YouTube's URL shapes:
+//   youtube.com/watch?v=<id>   youtu.be/<id>        youtube.com/shorts/<id>
+//   youtube.com/embed/<id>     youtube.com/live/<id>
+export function youTubeVideoId(rawUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (!isYouTubeUrl(url)) return null;
+
+  const segments = url.pathname.split("/").filter(Boolean);
+  const candidate =
+    bareHostname(url) === "youtu.be"
+      ? segments[0]
+      : segments[0] === "watch"
+        ? url.searchParams.get("v")
+        : ["shorts", "embed", "live", "v"].includes(segments[0] ?? "")
+          ? segments[1]
+          : null;
+
+  return candidate && YOUTUBE_ID.test(candidate) ? candidate : null;
+}
+
+// mqdefault is the only thumbnail size that is both guaranteed to exist for
+// every video and genuinely 16:9. hqdefault - which is what oEmbed hands back -
+// is a 4:3 frame with black bars baked into the top and bottom, and those bars
+// would survive into the card's hero band.
+export function youTubeThumbnail(videoId: string): string {
+  return `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`;
+}
+
+// --- SoundCloud ------------------------------------------------------------
+
+function isSoundCloudUrl(url: URL): boolean {
+  const host = bareHostname(url);
+  return host === "soundcloud.com" || host.endsWith(".soundcloud.com");
+}
+
+// --- Google Maps -----------------------------------------------------------
+
+// The pin's real coordinates, buried in the opaque `data=` blob: !3d is the
+// latitude and !4d the longitude of the *place*. That is not the same point as
+// the viewport centre in `@lat,lng,zoom`, which moves whenever the map was
+// panned or zoomed before the link was shared.
+const MAPS_PLACE_PIN = /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/;
+const MAPS_VIEWPORT = /@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/;
+const LAT_LNG_PAIR = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/;
+
+// Zoom 15 is close enough to read the surrounding streets but wide enough that
+// a slightly-off pin still lands in frame.
+export const MAP_DEFAULT_ZOOM = 15;
+
+export interface MapCoords {
+  lat: number;
+  lng: number;
+}
+
+export function isMapsShortLink(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const host = bareHostname(url);
+    return host === "maps.app.goo.gl" || (host === "goo.gl" && url.pathname.startsWith("/maps"));
+  } catch {
+    return false;
+  }
+}
+
+export function isPlaceUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const host = bareHostname(url);
+    if (host === "maps.app.goo.gl") return true;
+    if (host.startsWith("maps.google.")) return true;
+    // google.com/maps/..., plus the country domains (google.co.uk, google.de).
+    if (host === "goo.gl" || /^google\.[a-z]{2,}(\.[a-z]{2,})?$/.test(host)) {
+      return url.pathname.startsWith("/maps");
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function coordsIfValid(lat: number, lng: number): MapCoords | null {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+// Coordinates only, in descending order of trustworthiness. Returns null rather
+// than guessing: a /maps/search/ link names a place without pinning it, and the
+// caller still wants the name even when there is nothing to draw a map from.
+export function parseGoogleMapsUrl(rawUrl: string): MapCoords | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+
+  const pin = url.href.match(MAPS_PLACE_PIN);
+  if (pin) {
+    const coords = coordsIfValid(Number(pin[1]), Number(pin[2]));
+    if (coords) return coords;
+  }
+
+  const viewport = url.pathname.match(MAPS_VIEWPORT);
+  if (viewport) {
+    const coords = coordsIfValid(Number(viewport[1]), Number(viewport[2]));
+    if (coords) return coords;
+  }
+
+  for (const key of ["q", "query", "ll", "center", "daddr", "destination"]) {
+    const pair = url.searchParams.get(key)?.match(LAT_LNG_PAIR);
+    if (!pair) continue;
+    const coords = coordsIfValid(Number(pair[1]), Number(pair[2]));
+    if (coords) return coords;
+  }
+
+  return null;
+}
+
+function decodePlaceSegment(segment: string): string | null {
+  const spaced = segment.replace(/\+/g, " ");
+  try {
+    return cleanWhitespace(decodeURIComponent(spaced));
+  } catch {
+    // A stray "%" that isn't an escape sequence - keep the readable form rather
+    // than throwing the name away entirely.
+    return cleanWhitespace(spaced);
+  }
+}
+
+export function googleMapsPlaceName(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    const segments = url.pathname.split("/").filter(Boolean);
+    const placeIndex = segments.indexOf("place");
+    const named = placeIndex === -1 ? null : segments[placeIndex + 1];
+    // "/maps/place/@37.77,-122.41,17z" pins a spot with no name attached to it.
+    if (named && !named.startsWith("@")) return decodePlaceSegment(named);
+
+    const query = url.searchParams.get("query") ?? url.searchParams.get("q");
+    if (query && !LAT_LNG_PAIR.test(query)) return decodePlaceSegment(query);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function formatCoords({ lat, lng }: MapCoords): string {
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+}
+
+// Served by GET /api/map, which composites the tiles behind our own origin - so
+// this is same-origin, needs no CSP change, and carries no API key.
+export function mapThumbnailUrl({ lat, lng }: MapCoords, zoom: number = MAP_DEFAULT_ZOOM): string {
+  return `/api/map?lat=${lat.toFixed(5)}&lng=${lng.toFixed(5)}&z=${zoom}`;
+}
+
 // Instagram writes the caption into og:title behind the account name -
 //   Kokka Fabrics for Creators on Instagram: "Pathway by Bookhou..."
 // - and again into og:description behind a likes/comments/date preamble. Left
@@ -134,7 +324,7 @@ function cleanTweetText(raw: string): string | null {
 async function extractViaTwitterOEmbed(url: string): Promise<ExtractResult> {
   try {
     const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}`;
-    const res = await fetchWithTimeout(oembedUrl);
+    const res = await fetchWithTimeout(oembedUrl, { maxBytes: MAX_OEMBED_BYTES });
     // oEmbed 404s for a tweet that has been deleted or made private - that is
     // the only signal we get that a saved tweet is gone.
     if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
@@ -164,7 +354,7 @@ async function extractViaTwitterOEmbed(url: string): Promise<ExtractResult> {
 async function extractViaTikTokOEmbed(url: string): Promise<ExtractResult> {
   try {
     const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
-    const res = await fetchWithTimeout(oembedUrl);
+    const res = await fetchWithTimeout(oembedUrl, { maxBytes: MAX_OEMBED_BYTES });
     if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
     const data = (await res.json()) as {
       title?: string;
@@ -268,7 +458,10 @@ async function extractViaRedditOG(rawUrl: string): Promise<ExtractResult> {
 async function fetchRedditByline(canonicalUrl: string): Promise<string | null> {
   try {
     const oembedUrl = `https://www.reddit.com/oembed?url=${encodeURIComponent(canonicalUrl)}`;
-    const res = await fetchWithTimeout(oembedUrl, { headers: CRAWLER_PAGE_HEADERS });
+    const res = await fetchWithTimeout(oembedUrl, {
+      headers: CRAWLER_PAGE_HEADERS,
+      maxBytes: MAX_OEMBED_BYTES,
+    });
     if (!res.ok) return null;
     const data = (await res.json()) as { author_name?: string; author_url?: string };
     return redditUserFromAuthorUrl(data.author_url) ?? (data.author_name ? `u/${data.author_name}` : null);
@@ -283,7 +476,7 @@ async function fetchRedditByline(canonicalUrl: string): Promise<string | null> {
 async function extractViaSpotifyOEmbed(url: string): Promise<ExtractResult> {
   try {
     const oembedUrl = `https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`;
-    const res = await fetchWithTimeout(oembedUrl);
+    const res = await fetchWithTimeout(oembedUrl, { maxBytes: MAX_OEMBED_BYTES });
     if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
     const data = (await res.json()) as { title?: string; thumbnail_url?: string };
 
@@ -299,6 +492,186 @@ async function extractViaSpotifyOEmbed(url: string): Promise<ExtractResult> {
       siteName: "Spotify",
       imageUrl: thumbnail,
       httpStatus: res.status,
+    };
+  } catch {
+    return EMPTY_RESULT;
+  }
+}
+
+// YouTube's watch page does carry og: tags, but the generic Readability path
+// also scoops up the video description - which on most channels is a sponsor
+// blurb, a row of socials and a wall of affiliate links - and prints it as the
+// card's body. The oEmbed endpoint is public and keyless, and returns exactly
+// the three things a video card wants: the title, the channel and a thumbnail.
+async function extractViaYouTubeOEmbed(rawUrl: string): Promise<ExtractResult> {
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(rawUrl)}&format=json`;
+    const res = await fetchWithTimeout(oembedUrl, { maxBytes: MAX_OEMBED_BYTES });
+    // 401/404 here is how YouTube reports a video that is private, deleted or
+    // age-gated - the same signal the Twitter branch reads off a dead tweet.
+    if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
+
+    const data = (await res.json()) as { title?: string; author_name?: string; thumbnail_url?: string };
+    const title = cleanWhitespace(data.title ?? null);
+    if (!title) return { ...EMPTY_RESULT, httpStatus: res.status };
+
+    const videoId = youTubeVideoId(rawUrl);
+    return {
+      title,
+      // Null on purpose: a video has no article text, and the description is
+      // exactly what made these cards unreadable before.
+      extractedText: null,
+      contentFidelity: "metadata_only",
+      author: cleanWhitespace(data.author_name ?? null),
+      siteName: "YouTube",
+      imageUrl: videoId ? youTubeThumbnail(videoId) : (data.thumbnail_url ?? null),
+      httpStatus: res.status,
+    };
+  } catch {
+    return EMPTY_RESULT;
+  }
+}
+
+// SoundCloud's oEmbed title is "Track name by Artist" while author_name carries
+// the artist on its own, so the suffix is pure duplication - the card already
+// prints the artist on its own line directly under the name.
+function stripTrailingBy(title: string | null, artist: string | null): string | null {
+  if (!title || !artist) return title;
+  const suffix = ` by ${artist}`;
+  if (!title.toLowerCase().endsWith(suffix.toLowerCase())) return title;
+  return cleanWhitespace(title.slice(0, -suffix.length)) ?? title;
+}
+
+// SoundCloud reaches extractMusicMetadata like every other streaming service,
+// and everything there works except the one field a music card exists to show:
+// artistFromDescription explicitly refuses SoundCloud's og:description because
+// they write prose in it, so the artist came back null every single time. The
+// oEmbed endpoint is public, keyless, and hands over the artist directly.
+async function extractViaSoundCloudOEmbed(rawUrl: string): Promise<ExtractResult> {
+  try {
+    const oembedUrl = `https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(rawUrl)}`;
+    const res = await fetchWithTimeout(oembedUrl, { maxBytes: MAX_OEMBED_BYTES });
+    if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
+
+    const data = (await res.json()) as { title?: string; author_name?: string; thumbnail_url?: string };
+    const artist = cleanWhitespace(data.author_name ?? null);
+    const title = stripTrailingBy(cleanWhitespace(data.title ?? null), artist);
+    if (!title) return { ...EMPTY_RESULT, httpStatus: res.status };
+
+    return {
+      title,
+      extractedText: null,
+      contentFidelity: "metadata_only",
+      author: artist,
+      siteName: "SoundCloud",
+      imageUrl: data.thumbnail_url ?? null,
+      httpStatus: res.status,
+    };
+  } catch {
+    return EMPTY_RESULT;
+  }
+}
+
+// A maps.app.goo.gl link carries nothing at all - no coordinates, no place
+// name, not even a country. Following the redirect is the only way to reach the
+// real URL, and safeFetch re-validates every hop on the way.
+async function resolveMapsShortLink(rawUrl: string): Promise<{ url: string; httpStatus: number | null }> {
+  try {
+    const res = await fetchWithTimeout(rawUrl, { headers: CRAWLER_PAGE_HEADERS });
+    return { url: res.url, httpStatus: res.status };
+  } catch {
+    return { url: rawUrl, httpStatus: null };
+  }
+}
+
+// Google serves a crawler nothing about the place itself: og:title comes back
+// as the literal string "Google Maps" and og:description as the same "Find
+// local businesses..." blurb every maps URL gets, at the cost of a 216KB page
+// and a JSDOM parse. (Their og:image is a Static Maps URL carrying Google's own
+// API key, which is not ours to spend.) So the address comes from OSM's
+// reverse geocoder instead - keyless, a small JSON document, and it answers
+// with the actual street the pin is on.
+interface NominatimAddress {
+  house_number?: string;
+  road?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  suburb?: string;
+  state?: string;
+  country?: string;
+}
+
+// display_name is the full postal chain - "Tartine Bakery, 600, Guerrero
+// Street, Mission District, San Francisco, California, 94110, United States" -
+// which is far too long for a line under a card's title. Three parts is the
+// most a 240px card can show and the most a person needs to place somewhere.
+function shortAddress(address: NominatimAddress | undefined): string | null {
+  if (!address) return null;
+  // OSM writes a building spanning several numbers as "610;612"; an en dash
+  // is how a person would read that back.
+  const number = address.house_number?.replace(/\s*;\s*/g, "\u2013");
+  const street = [number, address.road].filter(Boolean).join(" ");
+  const locality = address.city ?? address.town ?? address.village ?? address.suburb;
+  const region = address.state ?? address.country;
+  return cleanWhitespace([street, locality, region].filter(Boolean).join(", "));
+}
+
+// Nominatim asks for no more than one request a second. Capture runs one link
+// at a time in a background job, so this is comfortably inside that - but it is
+// the reason this is never called anywhere that loops.
+async function reverseGeocode(
+  coords: MapCoords,
+): Promise<{ name: string | null; address: string | null }> {
+  try {
+    const query = `format=jsonv2&lat=${coords.lat}&lon=${coords.lng}&zoom=18&addressdetails=1`;
+    const res = await fetchWithTimeout(`https://nominatim.openstreetmap.org/reverse?${query}`, {
+      headers: OSM_HEADERS,
+      maxBytes: MAX_OEMBED_BYTES,
+    });
+    if (!res.ok) return { name: null, address: null };
+
+    const data = (await res.json()) as { name?: string; address?: NominatimAddress };
+    return { name: cleanWhitespace(data.name ?? null), address: shortAddress(data.address) };
+  } catch {
+    return { name: null, address: null };
+  }
+}
+
+// A place is a name and where it is. There is no article to summarize here, so
+// this never returns body text beyond the address - the same reasoning that
+// keeps a song down to its name and its artist.
+async function extractPlace(rawUrl: string): Promise<ExtractResult> {
+  try {
+    const short = isMapsShortLink(rawUrl) ? await resolveMapsShortLink(rawUrl) : null;
+    const resolved = short?.url ?? rawUrl;
+    const httpStatus = short?.httpStatus ?? null;
+
+    const coords = parseGoogleMapsUrl(resolved);
+    const nameFromUrl = googleMapsPlaceName(resolved);
+
+    // Only worth a request when there is a pin to look it up by. The name in
+    // the URL, when there is one, still doesn't carry the street.
+    const geo = coords ? await reverseGeocode(coords) : null;
+
+    const name = nameFromUrl ?? geo?.name ?? null;
+    const address = geo?.address ?? null;
+    if (!name && !address && !coords) return { ...EMPTY_RESULT, httpStatus };
+
+    // Most place-like thing first. A dropped pin often has no name at all, and
+    // its street reads far better as the card's title than a pair of decimals.
+    const where = coords ? formatCoords(coords) : null;
+    const title = name ?? address ?? where;
+    return {
+      title,
+      // Never repeat the title underneath itself: when the address had to serve
+      // as the name, the coordinates go below it instead.
+      extractedText: title === address ? where : (address ?? where),
+      contentFidelity: "metadata_only",
+      author: null,
+      siteName: "Google Maps",
+      imageUrl: coords ? mapThumbnailUrl(coords) : null,
+      httpStatus,
     };
   } catch {
     return EMPTY_RESULT;
@@ -474,13 +847,40 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
     return extractViaRedditOG(rawUrl);
   }
 
+  // Ahead of the music branch, which SoundCloud would otherwise fall into and
+  // come back from with no artist at all. That path is still the fallback.
+  if (isSoundCloudUrl(url)) {
+    const viaOEmbed = await extractViaSoundCloudOEmbed(rawUrl);
+    return viaOEmbed.title ? viaOEmbed : extractMusicMetadata(rawUrl, url);
+  }
+
   if (isMusicUrl(rawUrl)) {
     return extractMusicMetadata(rawUrl, url);
+  }
+
+  // Behind the music branch on purpose: a music.youtube.com link is a song
+  // rather than a video, and isMusicUrl claims it first.
+  if (isYouTubeUrl(url)) {
+    return extractViaYouTubeOEmbed(rawUrl);
+  }
+
+  if (isPlaceUrl(rawUrl)) {
+    return extractPlace(rawUrl);
   }
 
   try {
     const res = await fetchWithTimeout(rawUrl, { headers: BROWSER_PAGE_HEADERS });
     if (!res.ok) return { ...EMPTY_RESULT, httpStatus: res.status };
+
+    // Only parse what claims to be markup. A PDF or a video answers 200 with a
+    // body JSDOM will still dutifully try to read as HTML, which costs CPU on
+    // the request thread and produces nothing. A missing Content-Type is
+    // treated as HTML, which is what browsers do.
+    const contentType = res.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+    if (contentType && !contentType.includes("html") && !contentType.includes("xml")) {
+      return { ...EMPTY_RESULT, httpStatus: res.status };
+    }
+
     const html = await res.text();
     const dom = new JSDOM(html, { url: rawUrl });
     const doc = dom.window.document;
@@ -516,5 +916,22 @@ export async function extractFromUrl(rawUrl: string): Promise<ExtractResult> {
     return isInstagramUrl(url) ? applyInstagramShape(result) : result;
   } catch {
     return EMPTY_RESULT;
+  }
+}
+
+// Whether this URL is one the server is willing to fetch on someone's behalf.
+//
+// extractFromUrl already fails closed - a blocked URL throws inside it and
+// comes back as EMPTY_RESULT - but "failed to extract" is the same outcome as a
+// paywall, and it would still save the item. A URL pointing at the metadata
+// endpoint or at localhost is not a save that half worked; it is one that
+// should not happen, and the sender should be told rather than left with a card
+// that never fills in.
+export async function isFetchableUrl(rawUrl: string): Promise<boolean> {
+  try {
+    await assertSafeUrl(rawUrl);
+    return true;
+  } catch {
+    return false;
   }
 }

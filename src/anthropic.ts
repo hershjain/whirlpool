@@ -7,8 +7,22 @@ import { searchItems, listRecentItems, type ItemView } from "./repo.js";
 
 const MODEL = "claude-haiku-4-5";
 const MAX_CHAT_ITERATIONS = 4;
+// The tool loop passes the model's own `limit` straight to the query. Clamped
+// because "however many you asked for" is not a thing to let the other side of
+// the conversation decide - list_recent_items(limit: 10000) would return the
+// whole library and put it back in the next prompt.
+const MAX_TOOL_RESULTS = 25;
 
-const client = new Anthropic({ apiKey: config.anthropicApiKey });
+// Explicit, because the SDK defaults are wrong for this shape of work: a
+// 10-minute request timeout means one hung call holds a background capture job
+// open for ten minutes with nothing watching it, and these are short prompts
+// with small max_tokens - if one has not answered in 60 seconds it is not going
+// to. Retries stay on for the 429s and 5xxs that are worth retrying.
+const client = new Anthropic({
+  apiKey: config.anthropicApiKey,
+  timeout: 60_000,
+  maxRetries: 2,
+});
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 interface Prompt {
@@ -246,10 +260,13 @@ export async function chatAnswer(phone: string, question: string): Promise<ChatR
       if (block.type !== "tool_use") continue;
       const input = block.input as { query?: string; limit?: number };
 
+      const clamp = (value: number | undefined, fallback: number) =>
+        Math.min(Math.max(1, value ?? fallback), MAX_TOOL_RESULTS);
+
       const results =
         block.name === "list_recent_items"
-          ? await listRecentItems(phone, input.limit ?? 10)
-          : await searchItems(phone, input.query ?? "", input.limit ?? 5);
+          ? await listRecentItems(phone, clamp(input.limit, 10))
+          : await searchItems(phone, input.query ?? "", clamp(input.limit, 5));
 
       toolCalls.push({
         query: block.name === "list_recent_items" ? "(recent items)" : (input.query ?? ""),

@@ -6,6 +6,8 @@ import { createLoginCode, verifyLoginCode, createSession, revokeSession } from "
 import { deliverLoginCode } from "./notify.js";
 import { allowCodeRequest, allowVerifyAttempt } from "./rateLimit.js";
 import { setSessionCookie, clearSessionCookie, tokenFrom, rejectCrossSite } from "./httpAuth.js";
+import { asyncHandler } from "./http.js";
+import { log, safePhone, reportError } from "./logger.js";
 
 export const authRouter: Router = Router();
 
@@ -37,15 +39,15 @@ authRouter.post("/request-code", (req, res) => {
   void (async () => {
     try {
       if (!phone) {
-        console.log("[login] request-code with an unparseable number");
+        log.info("[login] request-code with an unparseable number");
         return;
       }
       if (!isDeliverable(phone)) {
-        console.log(`[login] refused ${phone}: outside the allowed calling codes`);
+        log.info({ phone: safePhone(phone) }, "[login] refused: outside the allowed calling codes");
         return;
       }
-      if (!allowCodeRequest(phone, ip, config.maxDailyLoginCodes)) {
-        console.log(`[login] rate limited ${phone} from ${ip}`);
+      if (!(await allowCodeRequest(phone, ip, config.maxDailyLoginCodes))) {
+        log.warn({ phone: safePhone(phone), ip }, "[login] rate limited");
         return;
       }
 
@@ -53,18 +55,18 @@ authRouter.post("/request-code", (req, res) => {
       if (!user) {
         // The intended path for someone who has not texted in yet. The login
         // page already tells them that is the prerequisite.
-        console.log(`[login] no account for ${phone}`);
+        log.info({ phone: safePhone(phone) }, "[login] no account for this number");
         return;
       }
       if (user.optedOutAt) {
-        console.log(`[login] ${phone} has opted out; not sending`);
+        log.info({ phone: safePhone(phone) }, "[login] opted out; not sending");
         return;
       }
 
       const code = await createLoginCode(phone);
       await deliverLoginCode(phone, code);
     } catch (error) {
-      console.error("[login] failed to issue a code", error);
+      reportError(error, { scope: "login.request-code", phone: safePhone(phone) });
     }
   })();
 });
@@ -74,32 +76,35 @@ authRouter.post("/request-code", (req, res) => {
 // One generic failure for every reason. Telling the difference between wrong,
 // expired and out-of-attempts is exactly the feedback that makes guessing
 // cheaper, and none of it helps a real user do anything different.
-authRouter.post("/verify", async (req, res) => {
-  const body = req.body as { phone?: unknown; code?: unknown };
-  const phone = toE164(body?.phone as string | undefined);
-  const code = typeof body?.code === "string" ? body.code.trim() : "";
+authRouter.post(
+  "/verify",
+  asyncHandler(async (req, res) => {
+    const body = req.body as { phone?: unknown; code?: unknown };
+    const phone = toE164(body?.phone as string | undefined);
+    const code = typeof body?.code === "string" ? body.code.trim() : "";
 
-  const failure = { error: "That code isn't right, or it has expired. Request a new one." };
+    const failure = { error: "That code isn't right, or it has expired. Request a new one." };
 
-  if (!phone || !/^\d{6}$/.test(code)) {
-    res.status(400).json(failure);
-    return;
-  }
+    if (!phone || !/^\d{6}$/.test(code)) {
+      res.status(400).json(failure);
+      return;
+    }
 
-  if (!allowVerifyAttempt(phone, clientIp(req))) {
-    res.status(429).json({ error: "Too many attempts. Try again later." });
-    return;
-  }
+    if (!(await allowVerifyAttempt(phone, clientIp(req)))) {
+      res.status(429).json({ error: "Too many attempts. Try again later." });
+      return;
+    }
 
-  if (!(await verifyLoginCode(phone, code))) {
-    res.status(400).json(failure);
-    return;
-  }
+    if (!(await verifyLoginCode(phone, code))) {
+      res.status(400).json(failure);
+      return;
+    }
 
-  const token = await createSession(phone);
-  setSessionCookie(res, token);
-  res.status(204).end();
-});
+    const token = await createSession(phone);
+    setSessionCookie(res, token);
+    res.status(204).end();
+  }),
+);
 
 // --- DEV-LOGIN: local development only, remove before launch ---
 //
@@ -110,38 +115,51 @@ authRouter.post("/verify", async (req, res) => {
 // into production is an authentication bypass, so it is wired shut there
 // rather than left to a checklist.
 authRouter.get("/dev-login", (_req, res) => {
-  res.json({ enabled: config.devLogin });
-});
-
-authRouter.post("/dev-login", async (_req, res) => {
+  // 404 rather than `{ enabled: false }`: an endpoint that answers at all is an
+  // endpoint that tells a stranger this bypass exists in the codebase. The login
+  // page reads a 404 as "no button", which is the same thing it did before.
   if (!config.devLogin) {
     res.status(404).end();
     return;
   }
-
-  const phone = toE164(config.ownerPhoneNumber);
-  if (!phone) {
-    res.status(500).json({ error: "OWNER_PHONE_NUMBER is not a valid E.164 number" });
-    return;
-  }
-
-  // Session has a foreign key to User, so the row has to exist. optInAt
-  // defaults and optInMessageSid is nullable, so there is no fake consent
-  // record here - this user simply has no opt-in message, which is true.
-  await prisma.user.upsert({
-    where: { phone },
-    update: { lastSeenAt: new Date() },
-    create: { phone },
-  });
-
-  const token = await createSession(phone);
-  setSessionCookie(res, token);
-  console.log(`[dev-login] signed in as ${phone} with no code`);
-  res.status(204).end();
+  res.json({ enabled: true });
 });
 
-authRouter.post("/logout", async (req, res) => {
-  await revokeSession(tokenFrom(req));
-  clearSessionCookie(res);
-  res.status(204).end();
-});
+authRouter.post(
+  "/dev-login",
+  asyncHandler(async (_req, res) => {
+    if (!config.devLogin) {
+      res.status(404).end();
+      return;
+    }
+
+    const phone = toE164(config.ownerPhoneNumber);
+    if (!phone) {
+      res.status(500).json({ error: "OWNER_PHONE_NUMBER is not a valid E.164 number" });
+      return;
+    }
+
+    // Session has a foreign key to User, so the row has to exist. optInAt
+    // defaults and optInMessageSid is nullable, so there is no fake consent
+    // record here - this user simply has no opt-in message, which is true.
+    await prisma.user.upsert({
+      where: { phone },
+      update: { lastSeenAt: new Date() },
+      create: { phone },
+    });
+
+    const token = await createSession(phone);
+    setSessionCookie(res, token);
+    log.warn({ phone: safePhone(phone) }, "[dev-login] signed in with no code");
+    res.status(204).end();
+  }),
+);
+
+authRouter.post(
+  "/logout",
+  asyncHandler(async (req, res) => {
+      await revokeSession(tokenFrom(req));
+      clearSessionCookie(res);
+      res.status(204).end();
+  }),
+);

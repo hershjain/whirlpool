@@ -34,6 +34,15 @@
      lighter --folder-soft above. */
   --folder-zone-fill: rgba(31, 139, 76, 0.3);
   --folder-zone-edge: rgba(31, 139, 76, 0.45);
+  /* The tour's dim. Dark enough that the lit cut-out is unmistakably the thing
+     being talked about, light enough that the board stays recognisable behind
+     it - the point is to teach where things are, not to hide them. */
+  --tour-scrim: rgba(14, 20, 36, 0.62);
+  /* The height every button in the toolbar is pinned to, and so also the ?'s
+     diameter. Pinned rather than left to the type: the circle has to match the
+     rectangles beside it exactly, and a line-height that resolves a pixel
+     differently would otherwise leave the row visibly uneven. */
+  --toolbar-btn-size: 24px;
 }
 
 * { box-sizing: border-box; }
@@ -79,6 +88,7 @@ html, body {
 
 #filter-toggle {
   margin-left: auto;
+  height: var(--toolbar-btn-size);
   padding: 4px 10px;
   font: inherit;
   font-size: 12px;
@@ -104,6 +114,7 @@ html, body {
 }
 
 #logout {
+  height: var(--toolbar-btn-size);
   padding: 4px 10px;
   font: inherit;
   font-size: 12px;
@@ -121,6 +132,31 @@ html, body {
 #logout:disabled {
   opacity: .5;
   cursor: default;
+}
+
+/* Same treatment as #logout beside it - same fill, same border, same muted type
+   darkening on hover - but round, so it reads as help about the row rather than
+   another action in it. Grid centring puts the glyph on the circle's centre in
+   both axes, the way .card-folder--empty centres its plus. */
+#tour-start {
+  width: var(--toolbar-btn-size);
+  height: var(--toolbar-btn-size);
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+#tour-start:hover {
+  color: var(--text);
 }
 
 /* The hint is the first thing worth dropping when the bar gets tight - the
@@ -470,6 +506,42 @@ html, body {
   height: 240px;
 }
 
+/* Only wrapped on a video card, so the play glyph has something to sit over.
+   Adds no box of its own - the height still comes from the image inside it. */
+.card-hero-wrap {
+  position: relative;
+  display: block;
+}
+
+/* An affordance, not a control. It says "this is a video"; the click it must
+   never receive falls through to the card, which opens the link like any
+   other. pointer-events:none is load-bearing - without it this would swallow
+   the pointerdown that starts a drag, and the tile would be stuck to the
+   board wherever the glyph happens to sit. */
+.card-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  background: rgba(17, 17, 17, 0.62);
+  pointer-events: none;
+}
+
+/* A right-pointing triangle, nudged 2px right of centre so it reads as
+   centred - a triangle's visual mass sits behind its point. */
+.card-play::after {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: 13px;
+  border-style: solid;
+  border-width: 9px 0 9px 14px;
+  border-color: transparent transparent transparent #ffffff;
+}
+
 .card-body {
   /* Extra room at the foot so the corner folder control never lands on the
      last line of text or the tag row. */
@@ -566,7 +638,8 @@ html, body {
   color: var(--text);
 }
 
-.card--broken .card-hero {
+.card--broken .card-hero,
+.card--broken .card-play {
   opacity: 0.45;
   filter: grayscale(1);
 }
@@ -736,6 +809,181 @@ body.dragging-zone .card {
 
 .card--foldered {
   z-index: 2;
+}
+
+/* --- The guided tour --- */
+
+/* Swallows every pointer event while the tour is up, so a drag on the dim can't
+   pan the board underneath and a click can't reach a card through it. */
+#tour-block {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  cursor: default;
+}
+
+/* Where the example card sits. Takes no pointer events, so the card is a
+   picture of a card - nothing on it can be hovered, dragged or clicked. */
+#tour-demo {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  pointer-events: none;
+}
+
+#tour-demo[hidden],
+#tour-ring[hidden] {
+  display: none;
+}
+
+/* The lit region, and the only source of the dim: this element is transparent,
+   and its spread shadow is what covers everything outside it. Plain box-shadow
+   on purpose - no clip-path and no newer geometry CSS, which has been dropped
+   silently by a browser on this project before. A step with nothing to light
+   collapses this to a point, and the shadow then covers the screen. */
+#tour-hole {
+  position: fixed;
+  z-index: 100;
+  pointer-events: none;
+  border-radius: 14px; /* .card's radius, since a card is the usual subject */
+  box-shadow: 0 0 0 9999px var(--tour-scrim);
+  transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
+}
+
+/* Rings the one thing the box is talking about, which on the card steps is a
+   single control inside the lit card rather than the card itself. */
+#tour-ring {
+  position: fixed;
+  z-index: 101;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+  animation: tour-pulse 1.9s ease-in-out infinite;
+  transition: left 0.3s ease, top 0.3s ease, width 0.3s ease, height 0.3s ease;
+}
+
+@keyframes tour-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(29, 95, 214, 0.28); }
+  50% { box-shadow: 0 0 0 8px rgba(29, 95, 214, 0.1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tour-hole,
+  #tour-ring {
+    transition: none;
+    animation: none;
+  }
+  #tour-ring {
+    box-shadow: 0 0 0 3px rgba(29, 95, 214, 0.28);
+  }
+}
+
+/* The box doing the explaining. Positioned in JS against whatever is ringed. */
+#tour-tip {
+  position: fixed;
+  z-index: 102;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  padding: 16px 18px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(20, 30, 60, 0.24);
+  transition: left 0.3s ease, top 0.3s ease;
+}
+
+.tour-tip-title {
+  margin: 0 0 6px;
+  padding-right: 20px; /* clears the skip control in the corner */
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.tour-tip-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.tour-tip-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+/* Pushes both buttons to the right end of the row. */
+.tour-tip-count {
+  margin-right: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.tour-tip-foot button {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.tour-back {
+  color: var(--muted);
+  background: var(--tag-bg);
+  border: 1px solid var(--card-border);
+}
+
+.tour-back:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.tour-back:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+.tour-next {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.tour-skip {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  opacity: .6;
+  cursor: pointer;
+}
+
+.tour-skip:hover {
+  opacity: 1;
+  background: var(--tag-bg);
+}
+
+/* The example card is the real component with nothing wired to it. The
+   transition override needs .card as well: .card:not(.dragging) animates left
+   and top, and at one class lighter this would lose to it and the card would
+   slide in from the layer's corner. */
+.card.card--demo {
+  pointer-events: none;
+  transition: none;
 }
 
 #empty-state {

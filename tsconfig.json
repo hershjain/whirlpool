@@ -11,5 +11,9 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // dev-cli and dev-chat write real rows to the real database with no auth.
+  // Harmless locally via tsx; compiled into dist/ they become a way to do that
+  // on a production box, so they never reach the image.
+  "exclude": ["src/dev-cli.ts", "src/dev-chat.ts"]
 }

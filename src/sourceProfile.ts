@@ -5,7 +5,8 @@ import decodeIco from "decode-ico";
 import type { SourceProfile } from "@prisma/client";
 import { prisma } from "./db.js";
 import { fetchWithTimeout, BROWSER_PAGE_HEADERS, BROWSER_IMAGE_HEADERS } from "./httpFetch.js";
-import { cleanWhitespace } from "./linkExtract.js";
+import { log, reportError } from "./logger.js";
+import { cleanWhitespace, isPlaceUrl } from "./linkExtract.js";
 
 // Resolves the branding (name, color, cached logo) shown on a card's header
 // bar, for any hostname on the internet. A user can save a link from any
@@ -26,6 +27,8 @@ import { cleanWhitespace } from "./linkExtract.js";
 
 const ICON_FETCH_TIMEOUT_MS = 5_000;
 const MAX_ICON_BYTES = 256 * 1024;
+// A web app manifest is a short JSON document; anything larger is not one.
+const MAX_MANIFEST_BYTES = 256 * 1024;
 const PROFILE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // re-resolve a healthy profile monthly
 const FAILED_RETRY_MS = 24 * 60 * 60 * 1000; // retry sooner if we came up empty
 
@@ -50,6 +53,10 @@ const CURATED_SOURCES: Record<string, CuratedSource> = {
   "nytimes.com": { name: "The New York Times", color: "#000000" },
   "arxiv.org": { name: "arXiv", color: "#B31B1B" },
   "open.spotify.com": { name: "Spotify", color: "#1DB954" },
+  "soundcloud.com": { name: "SoundCloud", color: "#FF5500" },
+  // Reached only through canonicalSourceHostname below - a maps link is served
+  // from google.com, which must not brand every other Google link as Maps.
+  "maps.google.com": { name: "Google Maps", color: "#34A853" },
   "news.ycombinator.com": { name: "Hacker News", color: "#FF6600" },
   "wikipedia.org": { name: "Wikipedia", color: "#000000" },
 };
@@ -80,13 +87,36 @@ export function normalizeHostname(rawUrl: string): string | null {
   }
 }
 
+// Google Maps is served from google.com/maps, and SourceProfile is keyed by
+// hostname alone - so branding a map card off its bare hostname would hand
+// every Google link the same row and print "Google" on the header. A maps URL
+// gets a synthetic hostname instead.
+//
+// Every place that keys branding calls this, not stripWww/normalizeHostname
+// directly: the row the capture writes, the sweep that fills gaps, the list the
+// canvas fetches and the hostname it joins on all have to agree, or the card
+// looks up a profile that was stored under a different name.
+const MAPS_SOURCE_HOSTNAME = "maps.google.com";
+
+function canonicalHostnameFromUrl(url: URL): string {
+  return isPlaceUrl(url.toString()) ? MAPS_SOURCE_HOSTNAME : stripWww(url.hostname);
+}
+
+export function canonicalSourceHostname(rawUrl: string): string | null {
+  try {
+    return canonicalHostnameFromUrl(new URL(rawUrl));
+  } catch {
+    return null;
+  }
+}
+
 function isFresh(profile: SourceProfile): boolean {
   const age = Date.now() - profile.fetchedAt.getTime();
   return age < (profile.fetchFailed ? FAILED_RETRY_MS : PROFILE_TTL_MS);
 }
 
 export async function resolveSourceProfile(url: URL, dom: JSDOM | null): Promise<SourceProfile> {
-  const hostname = stripWww(url.hostname);
+  const hostname = canonicalHostnameFromUrl(url);
 
   const cached = await prisma.sourceProfile.findUnique({ where: { hostname } });
   if (cached && isFresh(cached)) return cached;
@@ -128,7 +158,7 @@ export async function resolveSourceProfileForCapture(rawUrl: string): Promise<So
     return null;
   }
 
-  const hostname = stripWww(url.hostname);
+  const hostname = canonicalHostnameFromUrl(url);
   const cached = await prisma.sourceProfile.findUnique({ where: { hostname } });
   if (cached && isFresh(cached)) return cached;
 
@@ -152,7 +182,7 @@ export async function resolveMissingSourceProfiles(): Promise<number> {
   const urlByHostname = new Map<string, string>();
   for (const { rawUrl } of items) {
     if (!rawUrl) continue;
-    const hostname = normalizeHostname(rawUrl);
+    const hostname = canonicalSourceHostname(rawUrl);
     if (hostname && !urlByHostname.has(hostname)) urlByHostname.set(hostname, rawUrl);
   }
 
@@ -165,11 +195,19 @@ export async function resolveMissingSourceProfiles(): Promise<number> {
       const profile = await resolveSourceProfileForCapture(rawUrl);
       if (profile) {
         resolved++;
-        console.log(`  ${profile.hostname} -> ${profile.name} (${profile.color}, via ${profile.colorSource})`);
+        log.debug(
+          {
+            hostname: profile.hostname,
+            name: profile.name,
+            color: profile.color,
+            via: profile.colorSource,
+          },
+          "Resolved source profile",
+        );
       }
     } catch (error) {
       // One dead host must not stop the sweep for the rest.
-      console.error(`  failed to resolve ${hostname}`, error);
+      reportError(error, { scope: "sourceProfile.sweep", hostname });
     }
   }
   return resolved;
@@ -272,7 +310,10 @@ interface ManifestIcon {
 
 async function readManifest(manifestUrl: string): Promise<{ themeColor: string | null; iconUrl: string | null }> {
   try {
-    const res = await fetchWithTimeout(manifestUrl, { timeoutMs: ICON_FETCH_TIMEOUT_MS });
+    const res = await fetchWithTimeout(manifestUrl, {
+      timeoutMs: ICON_FETCH_TIMEOUT_MS,
+      maxBytes: MAX_MANIFEST_BYTES,
+    });
     if (!res.ok) return { themeColor: null, iconUrl: null };
     const manifest = (await res.json()) as { icons?: ManifestIcon[]; theme_color?: string };
     const icons = manifest.icons ?? [];
@@ -359,10 +400,14 @@ async function downloadIcon(iconUrl: string): Promise<FetchedIcon | null> {
     const res = await fetchWithTimeout(iconUrl, {
       headers: BROWSER_IMAGE_HEADERS,
       timeoutMs: ICON_FETCH_TIMEOUT_MS,
+      // Enforced during the read, so an oversized icon is abandoned mid-stream.
+      // The check below used to be the only one, and it ran on a buffer that was
+      // already fully in memory - which is the part that costs.
+      maxBytes: MAX_ICON_BYTES,
     });
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.byteLength === 0 || buffer.byteLength > MAX_ICON_BYTES) return null;
+    if (buffer.byteLength === 0) return null;
 
     // Sniffed type wins over the declared one: it is both more reliable and
     // more accurate for the browser we later serve these bytes to. The

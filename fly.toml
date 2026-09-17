@@ -1,0 +1,52 @@
+# Rename `app` to whatever `fly apps create` gave you. Note that the .fly.dev
+# hostname is not PUBLIC_BASE_URL - the custom domain is - and that it has to
+# be a bare origin, no path and no trailing slash, because Twilio signature
+# validation compares it by exact string.
+app = "whirlpool"
+primary_region = "sjc"
+
+[build]
+
+[deploy]
+  # Runs inside the built image, before the new version takes traffic. This is
+  # why `prisma` is a runtime dependency rather than a dev one. `migrate deploy`
+  # is the production command: it applies pending migrations and nothing else.
+  # `migrate dev`, which the old README suggested, can prompt and can reset the
+  # database.
+  release_command = "npx prisma migrate deploy"
+
+[env]
+  PORT = "3000"
+  # Belt and braces with the Dockerfile's ENV. Set here too so that anyone
+  # reading fly.toml can see what the app runs as without opening the image.
+  NODE_ENV = "production"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+
+  # Never scale to zero. This app is a webhook receiver: Twilio waits about 15
+  # seconds and then retries, and a cold start inside that window turns one text
+  # into two delivery attempts. The dedupe guard catches that, but the first
+  # message would still be slow enough to feel broken.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    # /healthz runs SELECT 1 through Prisma rather than just answering 200, so a
+    # machine with a dead database fails the check instead of quietly serving
+    # errors. grace_period covers the release command plus boot.
+    grace_period = "15s"
+    interval = "30s"
+    method = "GET"
+    path = "/healthz"
+    timeout = "5s"
+
+[[vm]]
+  # Enough for one Node process doing JSDOM parsing on fetched pages. The 2MB
+  # response cap in safeFetch is what keeps that bounded; without it this size
+  # would be the thing that runs out first.
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,7 +1,7 @@
 import { prisma } from "./db.js";
 import type { Item, EnrichmentRun } from "@prisma/client";
-import { normalizeHostname } from "./sourceProfile.js";
-import { isMusicUrl } from "./linkExtract.js";
+import { canonicalSourceHostname, normalizeHostname } from "./sourceProfile.js";
+import { isMusicUrl, isPlaceUrl, youTubeVideoId } from "./linkExtract.js";
 
 export interface ItemView {
   id: string;
@@ -35,6 +35,14 @@ export interface ItemView {
   // describe a song it can only see the title of produced a Drake track filed
   // as a travel reference.
   isMusic: boolean;
+  // A YouTube video. Drives the play glyph drawn over the card's thumbnail -
+  // an affordance saying what the link is, not a control: clicking the card
+  // still opens YouTube in a new tab like every other card.
+  isVideo: boolean;
+  // A Google Maps link. Like a song, a place is a name and one fact about it -
+  // where it is - so the card leads with the name and puts the address under
+  // it, and carries no summary and no tags for the same reason music doesn't.
+  isPlace: boolean;
   contentFidelity: string;
   // True when the last fetch found the page gone. Surfaced on the card so a
   // dead save reads as dead rather than as an item that simply extracted badly.
@@ -91,15 +99,23 @@ function labelFor(item: Item): string {
   return item.rawText.length > 60 ? `${item.rawText.slice(0, 57)}...` : item.rawText;
 }
 
-async function toItemView(
+// The latest enrichment run is passed in rather than fetched here. This used to
+// issue one findFirst per item, which made every listing 1 + N queries with no
+// bound on N - and searchItems was already eager-loading the run and then
+// throwing it away by calling this.
+function toItemView(
   item: Item & { folder?: { id: string; name: string } | null },
-): Promise<ItemView> {
-  const run = await prisma.enrichmentRun.findFirst({
-    where: { itemId: item.id },
-    orderBy: { createdAt: "desc" },
-  });
+  run: EnrichmentRun | undefined,
+): ItemView {
   const label = labelFor(item);
   const isMusic = item.rawUrl !== null && isMusicUrl(item.rawUrl);
+  const isPlace = item.rawUrl !== null && isPlaceUrl(item.rawUrl);
+  const isVideo = item.rawUrl !== null && youTubeVideoId(item.rawUrl) !== null;
+  // A song and a map pin have the same problem: there is nothing in either for
+  // a model to summarize, and one asked to try will invent. Both are derived
+  // from the URL here rather than stored, so rows saved before any of this
+  // existed pick it up on the next read - see the note on isMusic below.
+  const isUnenriched = isMusic || isPlace;
 
   return {
     id: item.id,
@@ -110,19 +126,26 @@ async function toItemView(
     author: item.author,
     siteName: item.siteName,
     imageUrl: item.imageUrl,
-    sourceHostname: item.rawUrl ? normalizeHostname(item.rawUrl) : null,
+    sourceHostname: item.rawUrl ? canonicalSourceHostname(item.rawUrl) : null,
     // Suppressed here rather than only at capture, so the rows enriched before
     // music was recognised stop showing their invented summary and tags
     // without having to be rewritten.
-    summary: isMusic ? null : (run?.summary ?? null),
-    excerpt: excerptFor(item, label),
+    summary: isUnenriched ? null : (run?.summary ?? null),
+    // A video's own "text" is its description, which is where a channel keeps
+    // its sponsor blurb, its socials and a wall of affiliate links. Captures
+    // since the YouTube branch existed never store one - this drops the ones
+    // saved before it, which backfill-content cannot clear because it only
+    // ever fills a field in and never blanks it.
+    excerpt: isVideo ? null : excerptFor(item, label),
     isLongForm: isLongForm(item),
-    tags: isMusic || !run ? [] : (JSON.parse(run.tags) as string[]),
+    tags: isUnenriched || !run ? [] : (JSON.parse(run.tags) as string[]),
     // Dropped for the same reason as the tags, and so the rows enriched before
     // music was recognised behave like the ones captured since, which skip
     // enrichment and have no category at all.
-    category: isMusic ? null : (run?.category ?? null),
+    category: isUnenriched ? null : (run?.category ?? null),
     isMusic,
+    isVideo,
+    isPlace,
     contentFidelity: item.contentFidelity,
     isBroken: item.linkStatus === 404 || item.linkStatus === 410,
     hasPreview: Boolean(item.title || item.imageUrl || item.extractedText),
@@ -139,8 +162,9 @@ export async function listRecentItems(phone: string, limit = 5): Promise<ItemVie
     where: { phone },
     orderBy: { createdAt: "desc" },
     take: limit,
+    include: { enrichmentRuns: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
-  return Promise.all(items.map(toItemView));
+  return items.map((item) => toItemView(item, item.enrichmentRuns[0]));
 }
 
 // Words carrying no signal about *what* was saved - dropping them stops a
@@ -184,7 +208,7 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
   // nothing. A query that *does* have real terms but matches nothing returns
   // empty - better an honest "nothing found" than unrelated items.
   if (tokens.length === 0) {
-    return Promise.all(items.slice(0, limit).map(toItemView));
+    return items.slice(0, limit).map((item) => toItemView(item, item.enrichmentRuns[0]));
   }
 
   const scored = items
@@ -196,16 +220,19 @@ export async function searchItems(phone: string, query: string, limit = 5): Prom
     .filter((entry) => entry.score > 0)
     .sort((a, b) => b.score - a.score);
 
-  return Promise.all(scored.slice(0, limit).map((entry) => toItemView(entry.item)));
+  return scored.slice(0, limit).map((entry) => toItemView(entry.item, entry.item.enrichmentRuns[0]));
 }
 
 export async function listAllItems(phone: string): Promise<ItemView[]> {
   const items = await prisma.item.findMany({
     where: { phone },
     orderBy: { createdAt: "desc" },
-    include: { folder: true },
+    include: {
+      folder: true,
+      enrichmentRuns: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
   });
-  return Promise.all(items.map(toItemView));
+  return items.map((item) => toItemView(item, item.enrichmentRuns[0]));
 }
 
 // Scoped to `phone` so a canvas request can never move another user's item,
@@ -316,4 +343,31 @@ export async function updateFolderPosition(
     data: { canvasX: x, canvasY: y },
   });
   return result.count > 0;
+}
+
+// The source-branding rows for the hostnames this person has actually saved
+// from.
+//
+// The canvas used to fetch SourceProfile unscoped, which is defensible - the
+// table is global branding data, not anyone's content - but the *set of
+// hostnames in it* is the aggregate reading habits of everyone using the app,
+// handed to every logged-in user. Scoping it costs one extra query and leaks
+// nothing.
+export async function listSourceProfilesForPhone(phone: string) {
+  const rows = await prisma.item.findMany({
+    where: { phone, rawUrl: { not: null } },
+    select: { rawUrl: true },
+    distinct: ["rawUrl"],
+  });
+
+  const hostnames = [
+    ...new Set(
+      rows
+        .map((row) => (row.rawUrl ? canonicalSourceHostname(row.rawUrl) : null))
+        .filter((host): host is string => host !== null),
+    ),
+  ];
+  if (hostnames.length === 0) return [];
+
+  return prisma.sourceProfile.findMany({ where: { hostname: { in: hostnames } } });
 }

@@ -1,5 +1,5 @@
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -41,6 +41,10 @@ model Item {
 
   enrichmentRuns EnrichmentRun[]
 
+  // phone is the tenant key on every query in repo.ts; createdAt is the sort
+  // order all three list queries use. Without this pair each of them scans the
+  // whole table and sorts in memory.
+  @@index([phone, createdAt])
   @@index([folderId])
 }
 
@@ -78,7 +82,9 @@ model EnrichmentRun {
   outputTokens  Int
   createdAt     DateTime @default(now())
 
-  @@index([itemId])
+  // toItemView looks up the newest run for one item; the bare itemId index
+  // found the rows but still sorted them.
+  @@index([itemId, createdAt])
 }
 
 // Per-hostname branding for the canvas cards - name, color, and a cached
@@ -110,13 +116,41 @@ model ChatTurn {
   outputTokens  Int
   messageSid    String   @unique
   createdAt     DateTime @default(now())
+
+  @@index([phone])
 }
 
 // Guards against Twilio webhook retries double-processing the same inbound
 // message, regardless of which command it maps to.
+//
+// The row is claimed before the work starts, so a concurrent retry sees it and
+// backs off - but it is only *completed* afterwards. That distinction is the
+// whole point: a crash or a deploy mid-job used to leave a row that looked
+// processed, so Twilio's retry was swallowed and the message was lost with no
+// error anywhere. A claim that is still "processing" past CLAIM_STALE_MS is
+// treated as abandoned and can be taken over.
 model ProcessedMessage {
-  messageSid String   @id
-  createdAt  DateTime @default(now())
+  messageSid  String    @id
+  status      String    @default("processing") // "processing" | "completed"
+  claimedAt   DateTime  @default(now())
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([status, claimedAt])
+}
+
+// Sliding-window rate limiter, one row per allowed hit.
+//
+// This lived in a module-level Map until the move to Postgres. In memory the
+// windows reset on every deploy, which handed everyone - including whoever was
+// being limited - a fresh allowance, and that included the global daily ceiling
+// on login codes that exists to cap an SMS-pumping bill. Rows are swept hourly.
+model RateLimitHit {
+  id        String   @id @default(cuid())
+  key       String
+  createdAt DateTime @default(now())
+
+  @@index([key, createdAt])
 }
 
 // --- Identity and sessions ---

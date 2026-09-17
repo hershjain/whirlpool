@@ -1,0 +1,22 @@
+# Secrets. There is a real .env on disk with live Twilio and Anthropic
+# credentials; without this line a `COPY . .` bakes them into an image layer,
+# where they survive every later RUN that tries to delete them.
+.env
+.env.*
+!.env.example
+
+# Rebuilt inside the image. Copying the host's dist/ would ship whatever was
+# last compiled locally - which is not necessarily what is in src/.
+dist/
+node_modules/
+
+# Local database. Production is Postgres; this is a leftover from SQLite.
+prisma/*.db
+prisma/*.db-journal
+
+.git/
+.gitignore
+.DS_Store
+*.log
+docs/
+README.md

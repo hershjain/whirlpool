@@ -88,7 +88,11 @@ changes later.
 - A [Twilio](https://console.twilio.com) account with a phone number
   (SMS-capable)
 - An [Anthropic API key](https://console.anthropic.com)
+- A Postgres database. Any will do; [Neon](https://neon.tech) and
+  [Supabase](https://supabase.com) both have a free tier that fits this.
 - Node.js 20+
+- Optionally a [Sentry](https://sentry.io) project. Without a DSN errors are
+  still logged, they just do not page anyone.
 
 ## Setup
 
@@ -104,28 +108,30 @@ changes later.
    cp .env.example .env
    ```
 
-   Fill in:
-   - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER` — from
-     the Twilio console
-   - `OWNER_PHONE_NUMBER` — your own phone number, in E.164 format
-     (`+1XXXXXXXXXX`). Only used to seed the first `User` row on an existing
-     install; every number is accepted now, and `/api` is scoped by session.
-   - `ANTHROPIC_API_KEY` — from the Anthropic console
-   - `PUBLIC_BASE_URL` — the public HTTPS URL this app will be reachable at
-     (see deployment below). **A bare origin: no path, no trailing slash.**
-     Three things read it — Twilio webhook signature validation, the `Origin`
-     allowlist that rejects cross-site writes, and the domain in the login
-     text's one-time-code line, which must match the origin serving `/login`
-     or iOS won't offer to autofill it.
+   `.env.example` documents every variable. The ones without an obvious value:
+
+   - `PUBLIC_BASE_URL` — the origin this app is reachable at. **A bare origin:
+     no path, no trailing slash.** Three things read it — Twilio webhook
+     signature validation, the `Origin` allowlist that rejects cross-site
+     writes, and the domain in the login text's one-time-code line, which must
+     match the origin serving `/login` or iOS won't offer to autofill it. The
+     server refuses to boot on a malformed value rather than letting you
+     discover it as silent 403s.
+   - `DATABASE_URL` — a Postgres connection string. Locally, a container:
+
+     ```bash
+     docker run -d --name whirlpool-pg -p 5432:5432 \
+       -e POSTGRES_PASSWORD=whirlpool -e POSTGRES_DB=whirlpool postgres:16
+     ```
+
+   - `OWNER_PHONE_NUMBER` — the number the DEV-LOGIN shortcut signs in as.
+     Nothing else reads it, and it comes out when DEV-LOGIN does.
 
 3. **Set up the database**
 
    ```bash
    npx prisma migrate dev
    ```
-
-   This creates a local SQLite file at `prisma/dev.db` (path controlled by
-   `DATABASE_URL` in `.env`).
 
 4. **Run it**
 
@@ -142,28 +148,90 @@ changes later.
 
    For local testing before you've deployed anywhere, expose your local
    server with a tunnel (e.g. `cloudflared tunnel --url http://localhost:3000`)
-   and use the tunnel's URL for both `PUBLIC_BASE_URL` and the Twilio webhook
    — Twilio needs a real public HTTPS URL to reach you, even in development.
+
+   Rather than editing `.env` back and forth, keep it on localhost and put the
+   tunnel-only settings in `.env.tunnel`:
+
+   ```bash
+   npm run dev          # localhost, DEV-LOGIN available
+   npm run dev:tunnel   # .env.tunnel layered over .env
+   ```
+
+   `--env-file` loads `.env.tunnel` before `dotenv` reads `.env`, and `dotenv`
+   does not overwrite what is already set — so the tunnel file only has to carry
+   what differs, and secrets stay in one place. What differs is the tunnel
+   hostname (update it each session; these rotate) and `NODE_ENV=production`,
+   which an https origin requires: the boot guard in `src/config.ts` refuses to
+   run as development on a public hostname, where DEV-LOGIN would be an open
+   auth bypass. So in tunnel mode you sign in with a real code — printed to the
+   server log while `LOGIN_CODE_TRANSPORT=console` — and the session cookie gets
+   `Secure`, meaning you must use the tunnel URL in the browser rather than
+   `http://localhost:3000`.
+
+## Checks
+
+```bash
+npm run typecheck   # tsc --strict, no emit
+npm test            # builds, then runs node --test over test/
+```
+
+The suite is deliberately narrow: it covers the SSRF guard in
+`src/safeFetch.ts`, where a subtle mistake is a working read primitive against
+the private network. Everything else is still unverified — see "Notes on
+scope".
 
 ## Deployment (Fly.io)
 
+The repo carries its own `Dockerfile` and `fly.toml`, so **do not run
+`fly launch`** — it would overwrite them.
+
 ```bash
-fly launch        # creates the app, generates fly.toml
-fly volumes create whirlpool_data --size 1
+fly auth login
+fly apps create whirlpool          # the name decides your .fly.dev hostname
+```
+
+Set `app` in `fly.toml` to that name. The public origin is the custom domain,
+not the `.fly.dev` host — see `docs/launch-checklist.md` for the certificate
+and DNS records, which are worth starting early. Then set the secrets:
+
+```bash
+fly secrets set \
+  NODE_ENV=production \
+  DATABASE_URL="postgresql://..." \
+  PUBLIC_BASE_URL="https://whrlpl.app" \
+  ANTHROPIC_API_KEY=... \
+  TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_PHONE_NUMBER=... \
+  OWNER_PHONE_NUMBER=... \
+  SENTRY_DSN="https://...ingest.sentry.io/..." \
+  LOGIN_CODE_TRANSPORT=console ALLOW_CONSOLE_CODES=1
+```
+
+`LOGIN_CODE_TRANSPORT=console` with the override is the right setting **until
+A2P registration clears** — carriers drop messages from unregistered long
+codes, so `sms` would send into a void. Drop both once you have a registered
+sender. The server refuses to boot in console mode under `NODE_ENV=production`
+without that explicit override, which is the point: the choice has to be made,
+not inherited.
+
+```bash
 fly deploy
 ```
 
-Attach the volume to `/data` in `fly.toml` and point `DATABASE_URL` at
-`file:/data/dev.db` so the SQLite file survives deploys/restarts. Set your
-`.env` values as Fly secrets instead of a committed file:
+Migrations run automatically — `fly.toml` sets
+`release_command = "npx prisma migrate deploy"`, which runs inside the built
+image before the new version takes traffic. That is why `prisma` is a runtime
+dependency rather than a dev one.
 
-```bash
-fly secrets set TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... \
-  TWILIO_PHONE_NUMBER=... OWNER_PHONE_NUMBER=... ANTHROPIC_API_KEY=... \
-  PUBLIC_BASE_URL=https://<your-app>.fly.dev
-```
+Then update the Twilio webhook to point at `<origin>/webhook/sms`. It has to match
+`PUBLIC_BASE_URL` exactly: signature validation reconstructs the URL from that
+variable rather than trusting the request, so an added trailing slash or query
+string silently 403s every inbound message.
 
-Then update the Twilio webhook to point at your `.fly.dev` URL.
+`docs/launch-checklist.md` has this as a tickable list, along with the parts
+only you can do — accounts, the A2P switchover, and the end-to-end checks that
+need a real handset.
+
 
 ## A nice-to-have, not built into this MVP
 
@@ -179,12 +247,34 @@ and photo. Not automated here; worth adding later if you want the polish.
 - Login codes are only sent to +1 numbers. The allowlist is in `src/phone.ts`
   and exists to close off SMS pumping, where someone drives thousands of code
   requests at premium ranges they earn a cut of and leaves you the bill.
-- Rate limits live in memory, so they reset on deploy. Fine for one process on
-  one machine; move them to the database before running more than one.
+- Rate limits are Postgres-backed, so they survive a deploy and would survive a
+  second instance. They were in memory until the move off SQLite, which meant
+  every deploy handed out a fresh global allowance of login codes — including to
+  whoever was being limited.
 - A phone number is the whole identity, so the usual caveat applies: anyone who
   controls the number — a SIM swap, or an unlocked phone on a table — can read
   the code and get in. Appropriate for a personal reading inbox, worth knowing
   you have accepted.
+- The server will not fetch a private, loopback or link-local address on a
+  sender's behalf, and refuses the save rather than storing a card that never
+  fills in. `src/safeFetch.ts` has the ranges and the one residual risk it does
+  not close (DNS rebinding between the check and the connection).
+- Outbound fetches are capped at 2MB for a page and 256KB for an icon, enforced
+  while reading rather than after, and a response that does not claim to be
+  markup is never handed to JSDOM.
+- **There are no tests beyond the SSRF guard, and no linter.** `tsc --strict`
+  is the only other gate. The gap worth closing first is tenant isolation —
+  `src/repo.ts` scopes every query by phone and nothing currently proves it
+  stays that way. Note that TypeScript will not catch a missing `await` on a
+  function used in a boolean position, which is exactly how a rate-limit check
+  can silently stop working; `@typescript-eslint/no-misused-promises` is the
+  rule that does.
+- Search loads every item for a user into Node and substring-matches in JS
+  (`searchItems` in `src/repo.ts`). Fine for a personal library, and the thing
+  to replace with Postgres full-text search before it is not.
+- `/api/items` returns the whole board with no pagination.
+- One save makes several outbound requests — the page, then the source profile
+  fetches the same page again for branding. `src/sourceProfile.ts` notes it.
 - Instagram and paywalled links will often only capture a title/caption
   (see `content_fidelity` on each saved item) rather than full content —
   this is a platform-access limitation, not something more prompting can

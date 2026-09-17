@@ -3,6 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- The wordmark's spiral on the app's own --bg. Opaque on purpose: black on
+       transparency all but disappears on a dark tab strip. Generated from
+       assets/wp_logo.png by `npm run icons:build`. -->
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>privacy — whirlpool</title>
   <meta name="description" content="What whirlpool stores, why, and how to get rid of it." />
 
@@ -41,6 +47,14 @@
       The contents of your saves are sent to Anthropic for that purpose. Your
       data is not sold, and it is not used for advertising.
     </p>
+    <!-- Carrier/aggregator review looks for this disclosure specifically, in
+         close to these words. "Mobile information" means your number and your
+         SMS consent; the sentence above already covers the rest. -->
+    <p>
+      No mobile information is shared with third parties or affiliates for
+      marketing or promotional purposes. Text messaging originator opt-in data
+      and consent are never shared with anyone.
+    </p>
 
     <h2>Consent and opting out</h2>
     <p>
@@ -69,11 +83,11 @@
 
     <h2>Contact</h2>
     <p>
-      Questions about any of this: text Whirlpool, or email the address on the
-      landing page.
+      Questions about any of this: text Whirlpool, or email
+      <a href="mailto:hprmoj@gmail.com">hprmoj@gmail.com</a>.
     </p>
 
-    <p class="doc__back"><a href="/">&larr; back</a></p>
+    <p class="doc__back"><a href="/">&larr; back</a> &middot; <a href="/terms">Terms</a></p>
   </main>
 
   <script src="./site.js"></script>

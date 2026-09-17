@@ -3,6 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- The wordmark's spiral on the app's own --bg. Opaque on purpose: black on
+       transparency all but disappears on a dark tab strip. Generated from
+       assets/wp_logo.png by `npm run icons:build`. -->
+  <link rel="icon" href="/favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/favicon-32.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <title>Whirlpool</title>
   <!-- Inter stands in for X's Chirp, which is proprietary to X and served only
        from their CDN under hash-named files that change on every deploy. -->
@@ -26,6 +32,10 @@
          call fails, since a wrong number here would be worse than none. -->
     <span id="toolbar-who"></span>
     <button type="button" id="logout">Log out</button>
+    <!-- Starts the guided tour. Last in the row so it reads as help *about* the
+         bar rather than another thing in it, and a circle so it never gets
+         mistaken for one of the rounded-rectangle actions beside it. -->
+    <button type="button" id="tour-start" aria-label="How this board works" title="How this board works">?</button>
   </div>
   <div id="filter-bar"></div>
   <div id="viewport">
@@ -38,5 +48,6 @@
   </div>
   <div id="empty-state" hidden>Nothing saved yet — text Whirlpool a link or a thought to get started.</div>
   <script src="/canvas.js"></script>
+  <script src="/tour.js"></script>
 </body>
 </html>

@@ -1,11 +1,18 @@
 import { prisma } from "./db.js";
-import { extractFromUrl, isMusicUrl } from "./linkExtract.js";
+import { extractFromUrl, isMusicUrl, isPlaceUrl, isFetchableUrl } from "./linkExtract.js";
 import { resolveSourceProfileForCapture } from "./sourceProfile.js";
 import { enrichLink, enrichNote, enrichmentInput, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
 import { setOptedOut } from "./users.js";
+import { allowModelRequest } from "./rateLimit.js";
+import { config } from "./config.js";
+import { log, safePhone, reportError } from "./logger.js";
 
 const URL_REGEX = /https?:\/\/\S+/i;
+
+// Every branch that reaches a model checks the daily ceiling and returns this.
+// One string so the reply does not depend on which branch happened to hit it.
+const OVER_LIMIT = "You’ve hit today’s limit. Try again tomorrow.";
 
 const HELP_TEXT = [
   "Whirlpool commands:",
@@ -83,7 +90,19 @@ async function handleSaveLink(
   url: string,
   rawText: string,
   messageSid: string,
-): Promise<null> {
+): Promise<string | null> {
+  // Refused before anything is written. The server will not fetch a private or
+  // loopback address on someone else's behalf, and a link it will not fetch is
+  // not a link worth storing a dead card for.
+  if (!(await isFetchableUrl(url))) {
+    log.warn({ phone: safePhone(phone), url }, "Refused to fetch a blocked URL");
+    return "I can't save that link — it doesn't point anywhere I'm able to fetch.";
+  }
+
+  if (!(await allowModelRequest(phone, config.maxDailyModelRequestsPerPhone))) {
+    return OVER_LIMIT;
+  }
+
   const extraction = await extractFromUrl(url);
 
   const item = await prisma.item.create({
@@ -112,14 +131,18 @@ async function handleSaveLink(
   try {
     await resolveSourceProfileForCapture(url);
   } catch (error) {
-    console.error(`Failed to resolve source profile for ${url}`, error);
+    reportError(error, { scope: "sourceProfile.capture", url });
   }
 
   // A song is its name and its artist, both of which the extraction already
   // has. There is nothing for a model to summarize, and asking it to try gave
   // a Drake track the tags "virginia-beach, travel, coastal" - so music skips
   // enrichment entirely rather than paying for a wrong answer.
-  if (isMusicUrl(url)) {
+  //
+  // A map pin is the same shape of problem - a name and an address, with
+  // nothing a model could add that the extraction doesn't already have - so
+  // places skip it on the same grounds.
+  if (isMusicUrl(url) || isPlaceUrl(url)) {
     return null;
   }
 
@@ -147,7 +170,11 @@ async function handleSaveLink(
   return null;
 }
 
-async function handleSaveNote(phone: string, text: string, messageSid: string): Promise<null> {
+async function handleSaveNote(phone: string, text: string, messageSid: string): Promise<string | null> {
+  if (!(await allowModelRequest(phone, config.maxDailyModelRequestsPerPhone))) {
+    return OVER_LIMIT;
+  }
+
   const item = await prisma.item.create({
     data: {
       phone,
@@ -198,14 +225,25 @@ async function handleSearch(phone: string, term: string): Promise<string> {
   return items.map((item, i) => `${i + 1}. ${item.label} — ${item.summary ?? ""}`).join("\n");
 }
 
+// The digest used to serialize every item the user had ever saved into one
+// prompt. Cost grew linearly with the library, and a long enough one eventually
+// overflows the context window - which reaches the user as "Something went
+// wrong" on the one command whose whole job is to look back. A recap is a recap;
+// it does not need everything.
+const DIGEST_ITEM_LIMIT = 60;
+
 async function handleDigest(phone: string): Promise<string> {
+  if (!(await allowModelRequest(phone, config.maxDailyModelRequestsPerPhone))) return OVER_LIMIT;
+
   const items = await listAllItems(phone);
   if (items.length === 0) return "Nothing saved yet — text me anything to get started.";
-  const digest = await generateDigest(items);
+  const digest = await generateDigest(items.slice(0, DIGEST_ITEM_LIMIT));
   return digest.text;
 }
 
 async function handleChat(phone: string, question: string, messageSid: string): Promise<string> {
+  if (!(await allowModelRequest(phone, config.maxDailyModelRequestsPerPhone))) return OVER_LIMIT;
+
   const result = await chatAnswer(phone, question);
   await prisma.chatTurn.create({
     data: {

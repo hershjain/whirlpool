@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { config } from "./config.js";
 import { sessionFromToken } from "./auth.js";
+import { asyncHandler } from "./http.js";
 
 export const SESSION_COOKIE = "wp_session";
 
@@ -43,7 +44,7 @@ export function tokenFrom(req: Request): string | undefined {
 // 401s rather than redirecting: every caller is fetch() from canvas.js, which
 // turns a 401 into the redirect itself. An HTML redirect here would show up
 // as a successful response containing a login page, which is worse to debug.
-export const requireSession: RequestHandler = async (req, res, next) => {
+export const requireSession: RequestHandler = asyncHandler(async (req, res, next) => {
   const session = await sessionFromToken(tokenFrom(req));
   if (!session) {
     res.status(401).json({ error: "Not signed in" });
@@ -51,7 +52,7 @@ export const requireSession: RequestHandler = async (req, res, next) => {
   }
   req.phone = session.phone;
   next();
-};
+});
 
 // Defence in depth behind SameSite=Lax, which already blocks the cookie on a
 // cross-site POST. Belt and braces because the cost is four lines and the
@@ -68,8 +69,12 @@ export function rejectCrossSite(req: Request, res: Response, next: NextFunction)
     return;
   }
 
+  const allowed = config.isProduction
+    ? [config.publicBaseUrl]
+    : [config.publicBaseUrl, `http://localhost:${config.port}`];
+
   const origin = req.header("Origin");
-  if (origin && origin !== config.publicBaseUrl && origin !== `http://localhost:${config.port}`) {
+  if (origin && !allowed.includes(origin)) {
     res.status(403).json({ error: "Cross-site request refused" });
     return;
   }

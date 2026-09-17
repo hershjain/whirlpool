@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { sendSms } from "./twilio.js";
+import { log, safePhone } from "./logger.js";
 
 // The seam between "a code exists" and "the user has it".
 //
@@ -29,7 +30,15 @@ function codeMessage(code: string): string {
 
 export async function deliverLoginCode(phone: string, code: string): Promise<void> {
   if (config.loginCodeTransport === "console") {
-    console.log(`[login] code for ${phone}: ${code}`);
+    // The code is the entire point of this transport, so it is printed; the
+    // number beside it is not. A log line pairing a live code with the phone it
+    // opens is a credential, and this transport exists precisely for
+    // environments where logs get read casually.
+    //
+    // It goes in the message rather than a field because logger.ts redacts a
+    // "code" key everywhere, so an accidental one never leaks and this
+    // deliberate one still reads.
+    log.warn({ phone: safePhone(phone) }, `[login] code printed, not sent: ${code}`);
     return;
   }
 
@@ -43,17 +52,31 @@ export async function deliverLoginCode(phone: string, code: string): Promise<voi
 // tell the user their save landed or that an account now exists. This is the
 // one exception. It also carries the STOP disclosure that carriers expect on
 // the first message of a conversation.
-export async function sendWelcome(phone: string): Promise<void> {
-  const body = [
-    "Saved. This is Whirlpool — text me links or thoughts and I'll keep them, quietly.",
+// Split out from sendWelcome so the encoding rule below can be asserted in a
+// test without a Twilio client.
+//
+// Every character here is GSM-7, and it has to stay that way. A single
+// character outside that alphabet - an em dash, a curly apostrophe, an
+// ellipsis - silently re-encodes the whole message as UCS-2, where a segment
+// holds 67 characters instead of 153. At this length that is the difference
+// between two billed segments and three, on the one message every user gets.
+// Nothing about the sent message looks different, which is why it is a test
+// rather than a comment on its own.
+export function welcomeMessage(): string {
+  return [
+    "Saved. This is Whirlpool - text me links or thoughts and I'll keep them, quietly.",
     "",
     `See everything you've saved at ${config.publicBaseUrl}/login`,
     "",
     'Text "help" for commands. Reply STOP to opt out.',
   ].join("\n");
+}
+
+export async function sendWelcome(phone: string): Promise<void> {
+  const body = welcomeMessage();
 
   if (config.loginCodeTransport === "console") {
-    console.log(`[welcome] would send to ${phone}:\n${body}`);
+    log.info({ phone: safePhone(phone) }, "[welcome] would send (console transport)");
     return;
   }
 

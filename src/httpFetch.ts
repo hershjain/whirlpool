@@ -1,3 +1,5 @@
+import { safeFetch, type SafeResponse } from "./safeFetch.js";
+
 // Shared by linkExtract.ts (fetching the saved page) and sourceProfile.ts
 // (fetching favicons/manifests) so both time out the same way instead of
 // each hand-rolling their own AbortController.
@@ -30,6 +32,20 @@ export const BROWSER_IMAGE_HEADERS: Record<string, string> = {
   "Sec-Fetch-Dest": "image",
 };
 
+// OpenStreetMap's tile policy and Nominatim's usage policy both require a
+// User-Agent that identifies the application rather than impersonating a
+// browser, and both refuse bulk use. Kept here beside the other header sets so
+// the tile compositor and the reverse geocoder announce themselves identically.
+//
+// The contact URL is read straight off the environment rather than through
+// config.ts: linkExtract imports this module, and config throws on a missing
+// DATABASE_URL, which would make the pure URL-parsing tests need a database.
+export const OSM_HEADERS: Record<string, string> = {
+  "User-Agent": `Whirlpool/0.1 (+${process.env.PUBLIC_BASE_URL ?? "https://whirlpool.fly.dev"})`,
+  Accept: "application/json",
+};
+
+
 // A handful of sites render everything client-side and serve a bare app shell
 // to a browser UA - reddit.com answers 200 with 8KB of JavaScript and not one
 // og: tag. The same URL fetched as a social crawler gets the pre-rendered
@@ -46,21 +62,32 @@ export const CRAWLER_PAGE_HEADERS: Record<string, string> = {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+// Page HTML goes straight into JSDOM and Readability, which are synchronous and
+// memory-hungry, on the one thread that also serves every request. 2MB is
+// comfortably more than any article and far less than what it takes to run a
+// 512MB machine out of heap. Callers fetching something smaller - a favicon, an
+// oEmbed document - pass their own.
+const DEFAULT_MAX_BYTES = 2 * 1024 * 1024;
+
 export interface FetchWithTimeoutOptions {
   headers?: Record<string, string>;
   timeoutMs?: number;
+  maxBytes?: number;
 }
 
+// Every outbound fetch in the app goes through here, which is why the SSRF
+// guard lives behind it rather than at the call sites: linkExtract and
+// sourceProfile both fetch hosts chosen by whoever sent the text, and a check
+// that has to be remembered at eight call sites is a check that gets missed at
+// the ninth.
+//
+// Returns a SafeResponse rather than a Response. Same member names, so callers
+// are unchanged, but the body is read and capped before they see it and `url`
+// is the final hop - each one validated.
 export async function fetchWithTimeout(
   url: string,
   options: FetchWithTimeoutOptions = {},
-): Promise<Response> {
-  const { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { headers, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
+): Promise<SafeResponse> {
+  const { headers = {}, timeoutMs = DEFAULT_TIMEOUT_MS, maxBytes = DEFAULT_MAX_BYTES } = options;
+  return safeFetch(url, { headers, timeoutMs, maxBytes });
 }
