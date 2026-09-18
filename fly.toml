@@ -13,7 +13,21 @@ primary_region = "sjc"
   # is the production command: it applies pending migrations and nothing else.
   # `migrate dev`, which the old README suggested, can prompt and can reset the
   # database.
-  release_command = "npx prisma migrate deploy"
+  #
+  # DATABASE_URL is swapped for DIRECT_URL here because they are different
+  # endpoints on Neon: the app runs through the pooler (PgBouncer in
+  # transaction mode), which does not carry the session state migrations need -
+  # the advisory lock that stops two deploys migrating at once, and DDL that
+  # wants a stable session. Migrating through the pooler fails intermittently,
+  # which is the worst way for it to fail.
+  #
+  # Done here rather than as `directUrl` in schema.prisma on purpose: that
+  # field makes DIRECT_URL required by `prisma generate`, which runs during the
+  # Docker build, where Fly secrets do not exist. The build would break.
+  #
+  # Falls back to DATABASE_URL when DIRECT_URL is unset, so a plain Postgres
+  # with no pooler in front of it needs no second secret.
+  release_command = "sh -c 'export DATABASE_URL=\"${DIRECT_URL:-$DATABASE_URL}\"; npx prisma migrate deploy'"
 
 [env]
   PORT = "3000"

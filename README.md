@@ -199,6 +199,7 @@ and DNS records, which are worth starting early. Then set the secrets:
 fly secrets set \
   NODE_ENV=production \
   DATABASE_URL="postgresql://..." \
+  DIRECT_URL="postgresql://..." \
   PUBLIC_BASE_URL="https://whrlpl.app" \
   ANTHROPIC_API_KEY=... \
   TWILIO_ACCOUNT_SID=... TWILIO_AUTH_TOKEN=... TWILIO_PHONE_NUMBER=... \

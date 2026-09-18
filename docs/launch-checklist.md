@@ -11,13 +11,22 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
 
 ## Y1 — Accounts and credentials ⛔
 
-- [ ] **1. Postgres.** Create a free database on [Neon](https://neon.tech) or
-      [Supabase](https://supabase.com). Copy the **pooled** connection string —
-      it becomes `DATABASE_URL`.
+- [ ] **1. Postgres.** On [Neon](https://neon.tech), from the project
+      dashboard → **Connect**, copy **both** connection strings:
 
-      Fly Postgres also works but is self-managed and costs more; Neon's free
-      tier is the lower-effort choice and its pooled connection string is what
-      you want for a single small app.
+      - the **pooled** one (host contains `-pooler`) → `DATABASE_URL`
+      - the **direct** one (same host, no `-pooler`) → `DIRECT_URL`
+
+      The app runs through the pooler. Migrations do not: Neon's pooler is
+      PgBouncer in transaction mode and cannot hold the advisory lock
+      `prisma migrate deploy` takes, so the release command in `fly.toml`
+      swaps in `DIRECT_URL` for the migration and hands traffic back to the
+      pooled one. Migrating through a pooler fails intermittently, which is
+      the worst way for a deploy to fail.
+
+      You do **not** need Neon's CLI, MCP server, `neon.ts` config or
+      `neon deploy` — that flow is for projects that adopt Neon's own tooling.
+      This one needs two strings and nothing else.
 
 - [ ] **2. Fly.** Log in and create the app:
 
@@ -98,7 +107,8 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       ```bash
       fly secrets set \
         NODE_ENV=production \
-        DATABASE_URL="postgresql://..." \
+        DATABASE_URL="postgresql://...-pooler.../whirlpool?sslmode=require" \
+        DIRECT_URL="postgresql://.../whirlpool?sslmode=require" \
         PUBLIC_BASE_URL="https://whrlpl.app" \
         ANTHROPIC_API_KEY="sk-ant-..." \
         TWILIO_ACCOUNT_SID="AC..." \
