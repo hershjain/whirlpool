@@ -42,7 +42,8 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       `neon deploy` — that flow is for projects that adopt Neon's own tooling.
       This one needs two strings and nothing else.
 
-- [ ] **2. Fly.** Log in and create the app:
+- [x] **2. Fly.** App `whirlpool` created in org `hj`, region `ewr`.
+      Hostname `whirlpool.fly.dev`. For reference, the commands were:
 
       ```bash
       fly auth login
@@ -116,7 +117,8 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
 
 ## Y3 — Deploy ⛔
 
-- [ ] **8. Set the secrets.**
+- [x] **8. Secrets set** — 11 of them, staged then deployed. `SENTRY_DSN` is
+      deliberately absent until item 4. For reference:
 
       ```bash
       fly secrets set \
@@ -144,7 +146,11 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       `OWNER_PHONE_NUMBER` is only still required because the dev-login
       shortcut is still in the codebase. It drops off when that does.
 
-- [ ] **9. Deploy.**
+- [x] **9. Deployed** — machine `d895209b159598` in `ewr`, health check
+      passing, init migration applied to Neon through `DIRECT_URL`. Boot log
+      confirms `env=production`, `devLogin=false`, `transport=console`, and
+      `/auth/dev-login` returns 404. Shared IPv4 `66.241.125.92` and a
+      dedicated IPv6 were provisioned automatically; both are free.
 
       ```bash
       fly deploy
