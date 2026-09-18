@@ -60,8 +60,11 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       **Don't run `fly launch`.** It generates a `fly.toml`, and there is
       already a proper one in the repo.
 
-- [ ] **3. DNS and certificates.** Do this as soon as the app exists — the wait
-      is the long pole, and steps 7–8 can proceed while it propagates.
+- [x] **3. DNS and certificates.** Done. Apex `A`/`AAAA` at Namecheap point at
+      `66.241.125.92` and `2a09:8280:1::193:38e3:0`; `www` is a CNAME to
+      `whirlpool.fly.dev`. Both certificates issued by Let's Encrypt and
+      verified. No `_acme-challenge` record was needed — Fly validated
+      ownership from the AAAA record. For reference:
 
       ```bash
       fly ips allocate-v4 --shared    # free; a dedicated v4 costs extra
