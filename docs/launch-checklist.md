@@ -24,6 +24,16 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       pooled one. Migrating through a pooler fails intermittently, which is
       the worst way for a deploy to fail.
 
+      **Append `&pgbouncer=true` to the pooled string.** It tells Prisma to
+      stop using prepared statements, which PgBouncer in transaction mode
+      cannot keep across a connection it hands to someone else. Without it you
+      get "prepared statement already exists" under any concurrency — so it
+      works in testing and fails once two people use it at once.
+
+      Note that Neon labels these the other way round from this repo: what its
+      dashboard calls `DATABASE_URL` is the *direct* one, and belongs in
+      `DIRECT_URL` here.
+
       You do **not** need Neon's CLI, MCP server, `neon.ts` config or
       `neon deploy` — that flow is for projects that adopt Neon's own tooling.
       This one needs two strings and nothing else.
@@ -107,7 +117,7 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
       ```bash
       fly secrets set \
         NODE_ENV=production \
-        DATABASE_URL="postgresql://...-pooler.../whirlpool?sslmode=require" \
+        DATABASE_URL="postgresql://...-pooler.../neondb?sslmode=require&pgbouncer=true" \
         DIRECT_URL="postgresql://.../whirlpool?sslmode=require" \
         PUBLIC_BASE_URL="https://whrlpl.app" \
         ANTHROPIC_API_KEY="sk-ant-..." \
