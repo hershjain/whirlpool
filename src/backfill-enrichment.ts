@@ -38,14 +38,19 @@ async function main() {
 
     try {
       const enrichment = isNote ? await enrichNote(input) : await enrichLink(input);
+      if (!enrichment) {
+        console.log(`  - ${label} (model returned nothing usable)`);
+        continue;
+      }
+
       await prisma.enrichmentRun.create({
         data: {
           itemId: item.id,
           model: enrichment.model,
           promptVersion: enrichment.promptVersion,
-          summary: enrichment.summary,
+          summary: enrichment.summary ?? "",
           tags: JSON.stringify(enrichment.tags),
-          category: enrichment.category,
+          category: enrichment.category ?? "",
           inputTokens: enrichment.inputTokens,
           outputTokens: enrichment.outputTokens,
         },

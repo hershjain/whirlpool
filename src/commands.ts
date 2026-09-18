@@ -1,7 +1,15 @@
 import { prisma } from "./db.js";
 import { extractFromUrl, isMusicUrl, isPlaceUrl, isFetchableUrl } from "./linkExtract.js";
 import { resolveSourceProfileForCapture } from "./sourceProfile.js";
-import { enrichLink, enrichNote, enrichmentInput, classifyMessage, chatAnswer, generateDigest } from "./anthropic.js";
+import {
+  enrichLink,
+  enrichNote,
+  enrichmentInput,
+  noteIsWorthEnriching,
+  classifyMessage,
+  chatAnswer,
+  generateDigest,
+} from "./anthropic.js";
 import { listRecentItems, searchItems, listAllItems } from "./repo.js";
 import { setOptedOut } from "./users.js";
 import { allowModelRequest } from "./rateLimit.js";
@@ -154,14 +162,20 @@ async function handleSaveLink(
   }
 
   const enrichment = await enrichLink(enrichmentText);
+  // Null means the model returned placeholders rather than content. Same end
+  // state as the screen above declining to call at all: no run, no tags.
+  if (!enrichment) {
+    return null;
+  }
+
   await prisma.enrichmentRun.create({
     data: {
       itemId: item.id,
       model: enrichment.model,
       promptVersion: enrichment.promptVersion,
-      summary: enrichment.summary,
+      summary: enrichment.summary ?? "",
       tags: JSON.stringify(enrichment.tags),
-      category: enrichment.category,
+      category: enrichment.category ?? "",
       inputTokens: enrichment.inputTokens,
       outputTokens: enrichment.outputTokens,
     },
@@ -190,15 +204,23 @@ async function handleSaveNote(phone: string, text: string, messageSid: string): 
 
   // The summary this produces is never rendered - notes show raw text. Tags
   // and category are the point: they put notes in the canvas filter bar.
+  if (!noteIsWorthEnriching(text)) {
+    return null;
+  }
+
   const enrichment = await enrichNote(text);
+  if (!enrichment) {
+    return null;
+  }
+
   await prisma.enrichmentRun.create({
     data: {
       itemId: item.id,
       model: enrichment.model,
       promptVersion: enrichment.promptVersion,
-      summary: enrichment.summary,
+      summary: enrichment.summary ?? "",
       tags: JSON.stringify(enrichment.tags),
-      category: enrichment.category,
+      category: enrichment.category ?? "",
       inputTokens: enrichment.inputTokens,
       outputTokens: enrichment.outputTokens,
     },

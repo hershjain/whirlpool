@@ -3,6 +3,8 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { config } from "./config.js";
+import { sanitizeEnrichment, isUnusableEnrichment } from "./enrichmentQuality.js";
+import { log } from "./logger.js";
 import { searchItems, listRecentItems, type ItemView } from "./repo.js";
 
 const MODEL = "claude-haiku-4-5";
@@ -60,16 +62,19 @@ function formatItemForModel(item: ItemView) {
 // --- Enrichment (summary + tags + category), shared by links and notes ---
 
 export interface EnrichmentResult {
-  summary: string;
+  summary: string | null;
   tags: string[];
-  category: string;
+  category: string | null;
   model: string;
   promptVersion: string;
   inputTokens: number;
   outputTokens: number;
 }
 
-async function runEnrichment(text: string, prompt: Prompt): Promise<EnrichmentResult> {
+// Returns null when the model gave back nothing usable - see enrichmentQuality.
+// Callers write no EnrichmentRun in that case, which is the same end state as
+// the input screens that decline to call at all.
+async function runEnrichment(text: string, prompt: Prompt): Promise<EnrichmentResult | null> {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: 1024,
@@ -103,10 +108,22 @@ async function runEnrichment(text: string, prompt: Prompt): Promise<EnrichmentRe
   }
   const input = toolUse.input as { summary: string; tags: string[]; category: string };
 
+  // The schema guarantees the fields exist, not that they mean anything. A
+  // model with nothing to describe fills them with `<UNKNOWN>` rather than
+  // declining, and those values used to be stored and rendered verbatim.
+  const clean = sanitizeEnrichment(input);
+  if (isUnusableEnrichment(clean)) {
+    log.info(
+      { promptVersion: prompt.version, inputChars: text.length },
+      "Discarded an enrichment with no usable tags or category",
+    );
+    return null;
+  }
+
   return {
-    summary: input.summary,
-    tags: input.tags,
-    category: input.category,
+    summary: clean.summary,
+    tags: clean.tags,
+    category: clean.category,
     model: MODEL,
     promptVersion: prompt.version,
     inputTokens: response.usage.input_tokens,
@@ -136,15 +153,26 @@ export function enrichmentInput(extractedText: string | null, title: string | nu
   return leading;
 }
 
-export function enrichLink(extractedText: string): Promise<EnrichmentResult> {
+export function enrichLink(extractedText: string): Promise<EnrichmentResult | null> {
   return runEnrichment(extractedText, enrichLinkPrompt);
 }
 
 // Notes are rendered raw on the canvas - this summary is generated but never
 // shown. Tags and category are what earn the call: they put notes in the
 // filter bar and give chat search something better than literal text to match.
-export function enrichNote(text: string): Promise<EnrichmentResult> {
+export function enrichNote(text: string): Promise<EnrichmentResult | null> {
   return runEnrichment(text, enrichNotePrompt);
+}
+
+// A note with nothing in it is the one case worth catching before the call
+// rather than after, since it cannot come back usable. Kept deliberately
+// narrow: the note that prompted all of this ran to ten words and would sail
+// past any length threshold loose enough to be safe, so the real guard is on
+// what the model returns, not on what it is given.
+const MIN_NOTE_ENRICHMENT_CHARS = 3;
+
+export function noteIsWorthEnriching(text: string): boolean {
+  return text.trim().length >= MIN_NOTE_ENRICHMENT_CHARS;
 }
 
 // --- Classify a freeform message as a capture or a question ---

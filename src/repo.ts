@@ -2,6 +2,7 @@ import { prisma } from "./db.js";
 import type { Item, EnrichmentRun } from "@prisma/client";
 import { canonicalSourceHostname, normalizeHostname } from "./sourceProfile.js";
 import { isMusicUrl, isPlaceUrl, youTubeVideoId } from "./linkExtract.js";
+import { sanitizeStoredRun, isUnusableEnrichment } from "./enrichmentQuality.js";
 
 export interface ItemView {
   id: string;
@@ -115,7 +116,14 @@ function toItemView(
   // a model to summarize, and one asked to try will invent. Both are derived
   // from the URL here rather than stored, so rows saved before any of this
   // existed pick it up on the next read - see the note on isMusic below.
-  const isUnenriched = isMusic || isPlace;
+  // A run whose fields are placeholders is worth no more than no run at all.
+  // Sanitized here rather than only at capture, for the same reason music is:
+  // the rows written before the guard existed stop showing `<UNKNOWN>` on the
+  // next read, with nothing to migrate and nothing to backfill. It also maps
+  // the empty strings the write path stores for a dropped summary or category
+  // back to null, instead of rendering a blank one.
+  const clean = run ? sanitizeStoredRun(run) : null;
+  const isUnenriched = isMusic || isPlace || (clean !== null && isUnusableEnrichment(clean));
 
   return {
     id: item.id,
@@ -130,7 +138,7 @@ function toItemView(
     // Suppressed here rather than only at capture, so the rows enriched before
     // music was recognised stop showing their invented summary and tags
     // without having to be rewritten.
-    summary: isUnenriched ? null : (run?.summary ?? null),
+    summary: isUnenriched ? null : (clean?.summary ?? null),
     // A video's own "text" is its description, which is where a channel keeps
     // its sponsor blurb, its socials and a wall of affiliate links. Captures
     // since the YouTube branch existed never store one - this drops the ones
@@ -138,11 +146,11 @@ function toItemView(
     // ever fills a field in and never blanks it.
     excerpt: isVideo ? null : excerptFor(item, label),
     isLongForm: isLongForm(item),
-    tags: isUnenriched || !run ? [] : (JSON.parse(run.tags) as string[]),
+    tags: isUnenriched || !clean ? [] : clean.tags,
     // Dropped for the same reason as the tags, and so the rows enriched before
     // music was recognised behave like the ones captured since, which skip
     // enrichment and have no category at all.
-    category: isUnenriched ? null : (run?.category ?? null),
+    category: isUnenriched ? null : (clean?.category ?? null),
     isMusic,
     isVideo,
     isPlace,
