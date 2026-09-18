@@ -3,7 +3,12 @@
 # be a bare origin, no path and no trailing slash, because Twilio signature
 # validation compares it by exact string.
 app = "whirlpool"
-primary_region = "sjc"
+# Kept deliberately close to the database. Neon is in AWS us-east-2 (Ohio), and
+# every query this app makes is a round trip to it - several in sequence on the
+# webhook path, which fetches a page and then calls a model twice. From sjc
+# that is ~70ms of pure geography per query; from iad it is single digits.
+# Change this only alongside the Neon region, not on its own.
+primary_region = "iad"
 
 [build]
 
