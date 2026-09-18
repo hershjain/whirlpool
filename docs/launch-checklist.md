@@ -11,8 +11,12 @@ Sending number: **+1 716 575 3906**. Contact address: **hprmoj@gmail.com**.
 
 ## Y1 — Accounts and credentials ⛔
 
-- [ ] **1. Postgres.** On [Neon](https://neon.tech), from the project
-      dashboard → **Connect**, copy **both** connection strings:
+- [x] **1. Postgres.** Neon project `muddy-hill-79731583`, branch `production`.
+      Both endpoints verified from a dev machine: the direct one reports the
+      init migration pending against an empty database, and the pooled one
+      answers `SELECT 1`. The strings are in your hands, not in this repo.
+
+      From the project dashboard → **Connect**, both are:
 
       - the **pooled** one (host contains `-pooler`) → `DATABASE_URL`
       - the **direct** one (same host, no `-pooler`) → `DIRECT_URL`
